@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VanityForge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .glass-panel { background: rgba(40, 40, 40, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-10 px-4">
+
+    <!-- Banner -->
+    <div class="w-full max-w-2xl mb-8 flex justify-center">
+        <img src="banner.png" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
+    </div>
+
+    <!-- Auth Section -->
+    <div id="auth-section" class="w-full max-w-2xl glass-panel p-8 rounded-xl shadow-lg text-center transition-all duration-300">
+        <h2 class="text-2xl font-bold mb-6 text-purple-400">Connect to VanityForge</h2>
+        <button onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center mx-auto gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+            <i class="fa-solid fa-wallet"></i> Connect Phantom Wallet
+        </button>
+
+        <div class="mt-8 border-t border-gray-700 pt-4">
+            <p class="text-xs text-gray-500 mb-2 cursor-pointer hover:text-gray-400 transition-colors" onclick="document.getElementById('dev-login').classList.toggle('hidden')">Dev Access</p>
+            <div id="dev-login" class="hidden flex gap-2 justify-center mt-2">
+                <input type="password" id="dev-password" placeholder="Enter Dev Password" class="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm focus:outline-none focus:border-purple-500 text-white placeholder-gray-500">
+                <button onclick="handleDevLogin()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm transition-colors">Enter</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- App Interface (Hidden initially) -->
+    <div id="app-interface" class="w-full max-w-2xl hidden space-y-6 animate-fade-in-up">
+
+        <!-- Job Submission -->
+        <div class="glass-panel p-8 rounded-xl shadow-lg relative overflow-hidden">
+            <div class="absolute top-0 right-0 p-4 opacity-10">
+                <i class="fa-solid fa-code text-6xl text-purple-500"></i>
+            </div>
+            <h2 class="text-xl font-bold mb-4 text-purple-400 flex items-center gap-2">
+                <i class="fa-solid fa-plus-circle"></i> Request New Vanity Address
+            </h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Prefix (Starts with)</label>
+                    <input type="text" id="prefix" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. CAFE">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Suffix (Ends with)</label>
+                    <input type="text" id="suffix" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. 888">
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 mb-6">
+                <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                    <input type="checkbox" name="toggle" id="case-sensitive" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                    <label for="case-sensitive" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
+                </div>
+                <label for="case-sensitive" class="text-sm text-gray-300 cursor-pointer select-none">Case Sensitive</label>
+                <style>
+                    .toggle-checkbox:checked { right: 0; border-color: #9333ea; }
+                    .toggle-checkbox:checked + .toggle-label { background-color: #9333ea; }
+                    .toggle-checkbox { right: 0; border-color: #4b5563; transition: all 0.3s; top: 0; left: 0;}
+                    .toggle-checkbox:checked { left: 50%; }
+                    .toggle-label { width: 100%; }
+                    /* Custom toggle styling fix */
+                    .toggle-checkbox { position: absolute; top:0; left: 0; right: auto; bottom: auto; }
+                    .toggle-checkbox:checked { left: 1.25rem; border-color: #a855f7; }
+                </style>
+            </div>
+
+            <div class="bg-gray-800/50 rounded-lg p-4 mb-6 text-sm border border-gray-700">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-gray-400">Difficulty:</span>
+                    <span id="calc-difficulty" class="text-white font-bold">0 chars</span>
+                </div>
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-gray-400">Est. Time:</span>
+                    <span id="calc-time" class="text-white font-mono">Instant</span>
+                </div>
+                <div class="flex justify-between items-center pt-2 border-t border-gray-700">
+                    <span class="text-gray-400">Cost:</span>
+                    <span id="calc-cost" class="text-green-400 font-bold font-mono">0 Credits</span>
+                </div>
+            </div>
+
+            <button onclick="submitJob()" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 rounded-lg shadow-lg transition transform hover:scale-[1.01] active:scale-[0.99] flex justify-center items-center gap-2">
+                <i class="fa-solid fa-rocket"></i> Start Mining
+            </button>
+            <p id="submit-error" class="text-red-400 text-sm mt-3 text-center hidden bg-red-900/20 py-2 rounded border border-red-900/50"></p>
+        </div>
+
+        <!-- Jobs List -->
+        <div class="glass-panel p-8 rounded-xl shadow-lg">
+            <h3 class="text-lg font-bold mb-4 text-gray-300 border-b border-gray-700 pb-2 flex items-center justify-between">
+                <span><i class="fa-solid fa-list-ul mr-2 text-purple-500"></i>Your Jobs</span>
+                <span class="text-xs font-normal text-gray-500" id="user-id-display"></span>
+            </h3>
+            <div id="jobs-container" class="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                <p class="text-center text-gray-500 italic py-8">No active jobs found.</p>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // CONFIGURATION (HARDCODED)
+        const API_URL = "https://NEW-URL-MUST-BE-PLACED-HERE/submit-job";
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
+            authDomain: "vanityforge.firebaseapp.com",
+            projectId: "vanityforge",
+            storageBucket: "vanityforge.firebasestorage.app",
+            messagingSenderId: "124272129554",
+            appId: "1:124272129554:web:5e4f9e1d89bd54b3accacb",
+            measurementId: "G-97FJY9VP2K"
+        };
+
+        // INIT FIREBASE
+        if (!firebase.apps.length) {
+            firebase.initializeApp(FIREBASE_CONFIG);
+        }
+        const db = firebase.firestore();
+
+        // STATE
+        let currentUser = null;
+        let jobListenerUnsubscribe = null;
+
+        // AUTHENTICATION
+        async function connectWallet() {
+            if (window.solana && window.solana.isPhantom) {
+                try {
+                    const resp = await window.solana.connect();
+                    currentUser = resp.publicKey.toString();
+                    onLoginSuccess();
+                } catch (err) {
+                    console.error(err);
+                    alert("Connection failed.");
+                }
+            } else {
+                window.open("https://phantom.app/", "_blank");
+            }
+        }
+
+        function handleDevLogin() {
+            const pw = document.getElementById('dev-password').value;
+            if (pw === "123580-Toma") {
+                currentUser = "DEV_USER";
+                onLoginSuccess();
+            } else {
+                alert("Access Denied");
+                document.getElementById('dev-password').value = '';
+            }
+        }
+
+        function onLoginSuccess() {
+            document.getElementById('auth-section').classList.add('hidden');
+            const appInterface = document.getElementById('app-interface');
+            appInterface.classList.remove('hidden');
+
+            // Simple fade in effect
+            appInterface.style.opacity = 0;
+            setTimeout(() => {
+                appInterface.style.transition = 'opacity 0.5s ease-in-out';
+                appInterface.style.opacity = 1;
+            }, 50);
+
+            document.getElementById('user-id-display').innerText = currentUser === "DEV_USER" ? "Dev Mode" :
+                currentUser.slice(0, 4) + '...' + currentUser.slice(-4);
+
+            pollJobStatus();
+        }
+
+        // CALCULATIONS (Helpers)
+        function updateEstimates() {
+            const p = document.getElementById('prefix').value || "";
+            const s = document.getElementById('suffix').value || "";
+            const totalLen = p.length + s.length;
+
+            if (totalLen === 0) {
+                document.getElementById('calc-difficulty').innerText = "0 chars";
+                document.getElementById('calc-time').innerText = "Instant";
+                document.getElementById('calc-cost').innerText = "0 Credits";
+                return;
+            }
+
+            // Cost = 10^(TotalLength - 1)
+            let cost = Math.pow(10, Math.max(0, totalLen - 1));
+
+            // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
+            let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
+
+            let timeStr;
+            if (seconds < 1) timeStr = "Instant";
+            else if (seconds < 60) timeStr = Math.ceil(seconds) + "s";
+            else if (seconds < 3600) timeStr = Math.ceil(seconds/60) + "m";
+            else if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + "h";
+            else timeStr = (seconds/86400).toFixed(1) + "d";
+
+            document.getElementById('calc-difficulty').innerText = totalLen + " chars";
+            document.getElementById('calc-time').innerText = timeStr;
+            document.getElementById('calc-cost').innerText = cost.toLocaleString() + " Credits";
+        }
+
+        ['prefix', 'suffix'].forEach(id => {
+            document.getElementById(id).addEventListener('input', (e) => {
+                // Validate base58 input (alphanumeric except 0, O, I, l)
+                const val = e.target.value;
+                const clean = val.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+                if (val !== clean) e.target.value = clean;
+                updateEstimates();
+            });
+        });
+
+        // JOB SUBMISSION
+        async function submitJob() {
+            const prefix = document.getElementById('prefix').value;
+            const suffix = document.getElementById('suffix').value;
+            const caseSensitive = document.getElementById('case-sensitive').checked;
+            const errorEl = document.getElementById('submit-error');
+            const submitBtn = document.querySelector('button[onclick="submitJob()"]');
+
+            if (!prefix && !suffix) {
+                errorEl.innerText = "Please specify a prefix or suffix.";
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            errorEl.classList.add('hidden');
+
+            // Disable button
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+
+            const payload = {
+                user_id: currentUser,
+                prefix: prefix,
+                suffix: suffix,
+                case_sensitive: caseSensitive
+            };
+
+            try {
+                const res = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    // Success feedback
+                    document.getElementById('prefix').value = '';
+                    document.getElementById('suffix').value = '';
+                    updateEstimates();
+                    // Let the polling update the UI
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.message || "Submission failed. Check API configuration.");
+                }
+            } catch (e) {
+                errorEl.innerText = e.message;
+                errorEl.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Start Mining';
+            }
+        }
+
+        // POLLING & UI
+        function pollJobStatus() {
+            if (jobListenerUnsubscribe) jobListenerUnsubscribe();
+
+            const container = document.getElementById('jobs-container');
+
+            jobListenerUnsubscribe = db.collection('vanity_jobs')
+                .where('user_id', '==', currentUser)
+                .orderBy('created_at', 'desc')
+                .onSnapshot((snapshot) => {
+                    if (snapshot.empty) {
+                        container.innerHTML = '<p class="text-center text-gray-500 italic py-8">No active jobs found.</p>';
+                        return;
+                    }
+
+                    // Use a fragment to avoid partial reflows
+                    const fragment = document.createDocumentFragment();
+
+                    snapshot.forEach(doc => {
+                        const job = doc.data();
+                        const statusColor = job.status === 'completed' ? 'text-green-400' :
+                                            job.status === 'processing' ? 'text-yellow-400' :
+                                            job.status === 'failed' ? 'text-red-400' : 'text-gray-400';
+
+                        const statusIcon = job.status === 'completed' ? '<i class="fa-solid fa-check-circle"></i>' :
+                                           job.status === 'processing' ? '<i class="fa-solid fa-cog fa-spin"></i>' :
+                                           job.status === 'failed' ? '<i class="fa-solid fa-times-circle"></i>' : '<i class="fa-regular fa-clock"></i>';
+
+                        let resultHtml = '';
+                        if (job.status === 'completed' && job.public_key) {
+                             resultHtml = `
+                                <div class="mt-3 bg-gray-900/50 p-3 rounded border border-gray-700/50">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Public Key</span>
+                                        <button onclick="copyToClipboard('${job.public_key}')" class="text-xs text-purple-400 hover:text-purple-300 transition-colors" title="Copy Public Key"><i class="fa-regular fa-copy"></i></button>
+                                    </div>
+                                    <div class="font-mono text-xs break-all text-gray-300 mb-3 bg-black/20 p-2 rounded">${job.public_key}</div>
+
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
+                                        <button onclick="toggleReveal('${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold">Reveal</button>
+                                    </div>
+                                    <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
+                                        <div class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
+                                            ${job.secret_key || 'N/A'}
+                                        </div>
+                                        <button onclick="copyToClipboard('${job.secret_key}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
+                                    </div>
+                                </div>
+                             `;
+                        } else if (job.status === 'failed') {
+                            resultHtml = `
+                                <div class="mt-2 text-xs text-red-400 italic">
+                                    ${job.error || "Job failed to process."}
+                                </div>
+                            `;
+                        }
+
+                        const el = document.createElement('div');
+                        el.className = "bg-gray-800 p-4 rounded-lg border border-gray-700 shadow-sm hover:border-gray-600 transition-colors";
+                        el.innerHTML = `
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs font-bold bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600 font-mono">
+                                        ${job.prefix || '...'}-${job.suffix || '...'}
+                                    </span>
+                                    ${job.case_sensitive ? '<span class="text-xs text-purple-400 border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 rounded" title="Case Sensitive">Aa</span>' : ''}
+                                </div>
+                                <span class="text-sm font-bold ${statusColor} capitalize flex items-center gap-1">
+                                    ${statusIcon} ${job.status}
+                                </span>
+                            </div>
+                            <div class="text-[10px] text-gray-600 mb-1 font-mono uppercase tracking-widest">ID: ${doc.id}</div>
+                            ${resultHtml}
+                        `;
+                        fragment.appendChild(el);
+                    });
+
+                    container.innerHTML = '';
+                    container.appendChild(fragment);
+
+                }, (error) => {
+                    console.error("Error polling jobs:", error);
+                    container.innerHTML = '<p class="text-center text-red-500 py-4 bg-red-900/10 rounded border border-red-900/20">Error connection to job server.</p>';
+                });
+        }
+
+        // UTILS
+        function toggleReveal(id) {
+            const el = document.getElementById(`secret-${id}`);
+            const btn = document.getElementById(`btn-${id}`);
+            if (el.classList.contains('hidden')) {
+                el.classList.remove('hidden');
+                btn.innerText = "Hide";
+            } else {
+                el.classList.add('hidden');
+                btn.innerText = "Reveal";
+            }
+        }
+
+        function copyToClipboard(text) {
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => {
+                // Show a small toast notification could be nice, but alert is robust enough
+                // Let's stick to alert for simplicity as per requirements, or a non-blocking toast?
+                // Requirements just said "Include Reveal/Copy private key logic".
+                // I'll keep the alert but make it less intrusive if possible? No, alert is fine.
+                const originalText = document.activeElement.innerHTML;
+                if(document.activeElement.tagName === 'BUTTON') {
+                   const icon = document.activeElement.querySelector('i');
+                   if(icon) {
+                       icon.className = "fa-solid fa-check text-green-400";
+                       setTimeout(() => { icon.className = "fa-regular fa-copy"; }, 2000);
+                   }
+                }
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                prompt("Copy to clipboard: Ctrl+C, Enter", text);
+            });
+        }
+
+        // Global assignments
+        window.connectWallet = connectWallet;
+        window.handleDevLogin = handleDevLogin;
+        window.submitJob = submitJob;
+        window.toggleReveal = toggleReveal;
+        window.copyToClipboard = copyToClipboard;
+    </script>
+</body>
+</html>
