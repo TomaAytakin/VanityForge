@@ -314,7 +314,7 @@
 
             jobListenerUnsubscribe = db.collection('vanity_jobs')
                 .where('userId', '==', targetUserId)
-                .orderBy('timestamp', 'desc')
+                .orderBy('created_at', 'desc')
                 .limit(5)
                 .onSnapshot((snapshot) => {
                     const jobList = document.getElementById('job-list');
