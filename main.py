@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from google.cloud import pubsub_v1, firestore
 import os
 import uuid
@@ -12,6 +13,7 @@ TOPIC_ID = os.environ.get("PUBSUB_TOPIC_ID", "vanity-grind-jobs")
 JOB_COLLECTION = 'vanity_jobs'
 
 app = Flask(__name__)
+CORS(app)
 
 # Initialize clients
 try:
