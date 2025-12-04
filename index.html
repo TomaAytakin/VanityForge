@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VanityForge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <style>
+        body {
+            background-color: #111827; /* gray-900 */
+            color: #f3f4f6; /* gray-100 */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-4">
+
+    <!-- Banner -->
+    <div class="w-full max-w-2xl mb-8">
+        <img src="banner.png" alt="VanityForge Banner" class="w-full rounded-xl shadow-lg object-cover">
+    </div>
+
+    <!-- Main Container -->
+    <div class="w-full max-w-2xl bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700">
+        <h1 class="text-4xl font-extrabold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600">VanityForge</h1>
+
+        <!-- Authentication -->
+        <div id="auth-section" class="flex flex-col sm:flex-row justify-center gap-4 mb-8">
+            <button onclick="connectWallet()" id="wallet-btn" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 transform hover:scale-105 shadow-md flex items-center justify-center">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                Connect Phantom Wallet
+            </button>
+            <button onclick="handleDevLogin()" class="sm:w-auto bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-3 px-6 rounded-lg transition duration-200 border border-gray-600">
+                Dev Access
+            </button>
+        </div>
+
+        <div id="user-display" class="hidden flex flex-col items-center mb-8 p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+            <span class="text-gray-400 text-sm uppercase tracking-wider mb-1">Connected As</span>
+            <span id="user-id-text" class="text-xl font-mono text-green-400 font-bold"></span>
+            <span id="user-type-text" class="text-xs text-gray-500 mt-1"></span>
+        </div>
+
+        <!-- Generation Form -->
+        <div id="job-form" class="space-y-6 opacity-50 pointer-events-none transition-opacity duration-300">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-2">Prefix</label>
+                    <input type="text" id="prefix" class="w-full p-3 rounded-lg bg-gray-900 border border-gray-700 focus:outline-none focus:border-purple-500 text-white placeholder-gray-600 font-mono transition-colors" placeholder="e.g. COOL">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-2">Suffix</label>
+                    <input type="text" id="suffix" class="w-full p-3 rounded-lg bg-gray-900 border border-gray-700 focus:outline-none focus:border-purple-500 text-white placeholder-gray-600 font-mono transition-colors" placeholder="e.g. MINT">
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-3 bg-gray-900/50 p-3 rounded-lg border border-gray-700/50">
+                <div class="relative inline-block w-10 h-6 align-middle select-none transition duration-200 ease-in">
+                    <input type="checkbox" id="case-sensitive" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-gray-800 border-4 border-gray-600 appearance-none cursor-pointer transition-all duration-300 checked:right-0 checked:border-purple-500"/>
+                    <label for="case-sensitive" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-700 cursor-pointer"></label>
+                </div>
+                <label for="case-sensitive" class="text-gray-300 cursor-pointer select-none">Case Sensitive</label>
+            </div>
+
+            <div id="estimates" class="text-sm text-gray-400 pl-1 h-12 flex flex-col justify-center">
+                <!-- Estimates will appear here -->
+            </div>
+
+            <button onclick="startGeneration()" id="submit-btn" class="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-4 px-6 rounded-lg shadow-lg transform transition hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                Start Generation
+            </button>
+        </div>
+
+        <!-- Job History -->
+        <div class="mt-12 pt-8 border-t border-gray-700">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-200">Job History</h2>
+                <div id="loading-spinner" class="hidden animate-spin rounded-full h-5 w-5 border-b-2 border-purple-500"></div>
+            </div>
+            <div id="jobs-list" class="space-y-4 min-h-[100px]">
+                <p class="text-gray-500 text-center italic mt-8">Connect wallet to view jobs.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Styles for Toggle Switch -->
+    <style>
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #a855f7;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #a855f7;
+        }
+        .toggle-checkbox {
+            right: calc(100% - 1.5rem);
+        }
+    </style>
+
+    <script>
+        // --- Configuration ---
+        const API_URL = "https://vanityforge-git-124272129554.europe-west1.run.app/submit-job";
+        const FIREBASE_CONFIG = {
+          apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
+          authDomain: "vanityforge.firebaseapp.com",
+          projectId: "vanityforge",
+          storageBucket: "vanityforge.firebasestorage.app",
+          messagingSenderId: "124272129554",
+          appId: "1:124272129554:web:5e4f9e1d89bd54b3accacb",
+          measurementId: "G-97FJY9VP2K"
+        };
+
+        // --- Initialization ---
+        if (!firebase.apps.length) {
+            firebase.initializeApp(FIREBASE_CONFIG);
+        }
+        const db = firebase.firestore();
+
+        // --- State ---
+        let currentUser = null;
+        let jobListenerUnsubscribe = null;
+
+        // --- Auth Functions ---
+        async function connectWallet() {
+            if (window.solana && window.solana.isPhantom) {
+                try {
+                    const resp = await window.solana.connect();
+                    const publicKey = resp.publicKey.toString();
+                    setAuthenticatedUser(publicKey, 'wallet');
+                } catch (err) {
+                    console.error("User rejected request", err);
+                    alert("Connection cancelled.");
+                }
+            } else {
+                window.open("https://phantom.app/", "_blank");
+                alert("Phantom Wallet not found. Please install it.");
+            }
+        }
+
+        async function handleDevLogin() {
+            const password = prompt("Enter Dev Password:");
+            if (password === "123580-Toma") {
+                setAuthenticatedUser("DEV_USER", 'dev');
+            } else if (password !== null) {
+                alert("Access Denied.");
+            }
+        }
+
+        function setAuthenticatedUser(id, type) {
+            currentUser = { id, type };
+
+            // UI Updates
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('user-id-text').textContent = type === 'wallet'
+                ? `${id.slice(0, 4)}...${id.slice(-4)}`
+                : id;
+            document.getElementById('user-type-text').textContent = type === 'wallet' ? 'Phantom Wallet' : 'Developer Access';
+            document.getElementById('user-display').classList.remove('hidden');
+
+            // Enable Form
+            const form = document.getElementById('job-form');
+            form.classList.remove('opacity-50', 'pointer-events-none');
+
+            // Start Polling
+            pollJobStatus(id);
+        }
+
+        // --- Logic ---
+        async function startGeneration() {
+            if (!currentUser) return;
+
+            const btn = document.getElementById('submit-btn');
+            const prefix = document.getElementById('prefix').value.trim();
+            const suffix = document.getElementById('suffix').value.trim();
+            const caseSensitive = document.getElementById('case-sensitive').checked;
+
+            if (!prefix && !suffix) {
+                alert("Please specify at least a prefix or a suffix.");
+                return;
+            }
+
+            // Validate characters (Base58: alphanumeric except 0, O, I, l)
+            const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
+            if ((prefix && !base58Regex.test(prefix)) || (suffix && !base58Regex.test(suffix))) {
+                alert("Invalid characters. Base58 excludes: 0, O, I, l");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Submitting...`;
+
+            const payload = {
+                user_id: currentUser.id,
+                prefix: prefix,
+                suffix: suffix,
+                case_sensitive: caseSensitive
+            };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log("Job submitted:", data);
+                    // Clear inputs
+                    document.getElementById('prefix').value = '';
+                    document.getElementById('suffix').value = '';
+                    updateEstimates();
+                } else {
+                    const errText = await response.text();
+                    alert("Server Error: " + errText);
+                }
+            } catch (error) {
+                console.error("Submission failed:", error);
+                alert("Network error. Please try again.");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Start Generation";
+            }
+        }
+
+        function pollJobStatus(userId) {
+            if (jobListenerUnsubscribe) jobListenerUnsubscribe();
+
+            const jobsList = document.getElementById('jobs-list');
+            const spinner = document.getElementById('loading-spinner');
+
+            spinner.classList.remove('hidden');
+
+            jobListenerUnsubscribe = db.collection('vanity_jobs')
+                .where('user_id', '==', userId)
+                .orderBy('created_at', 'desc')
+                .onSnapshot((snapshot) => {
+                    spinner.classList.add('hidden');
+                    jobsList.innerHTML = '';
+
+                    if (snapshot.empty) {
+                        jobsList.innerHTML = '<p class="text-gray-500 text-center py-4">No jobs history found.</p>';
+                        return;
+                    }
+
+                    snapshot.forEach(doc => {
+                        const job = doc.data();
+                        renderJobCard(job, jobsList);
+                    });
+                }, (error) => {
+                    console.error("Firestore Error:", error);
+                    spinner.classList.add('hidden');
+                    if (error.code === 'failed-precondition') {
+                         jobsList.innerHTML = '<p class="text-red-400 text-center text-xs">Error: Missing Index. Ask Admin to create index for user_id + created_at.</p>';
+                    } else {
+                         jobsList.innerHTML = '<p class="text-red-400 text-center text-xs">Error loading jobs.</p>';
+                    }
+                });
+        }
+
+        function renderJobCard(job, container) {
+            const card = document.createElement('div');
+            card.className = "bg-gray-700/50 border border-gray-600 p-4 rounded-lg shadow transition hover:bg-gray-700";
+
+            let statusColor = "text-yellow-400";
+            let statusIcon = `<svg class="w-4 h-4 mr-1 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+
+            if (job.status === "COMPLETED") {
+                statusColor = "text-green-400";
+                statusIcon = `<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
+            } else if (job.status === "FAILED") {
+                statusColor = "text-red-400";
+                statusIcon = `<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+            }
+
+            const prefix = job.prefix || '-';
+            const suffix = job.suffix || '-';
+            const caseFlag = job.case_sensitive ? '(Case Sensitive)' : '';
+
+            let resultHTML = '';
+            if (job.public_key) {
+                resultHTML += `
+                    <div class="mt-3 bg-gray-900/50 p-2 rounded border border-gray-600/50">
+                        <div class="text-xs text-gray-400 uppercase">Public Key</div>
+                        <div class="text-sm font-mono text-purple-300 break-all select-all">${job.public_key}</div>
+                    </div>
+                `;
+            }
+            if (job.secret_key) {
+                 resultHTML += `
+                    <div class="mt-2 bg-gray-900/50 p-2 rounded border border-gray-600/50">
+                        <div class="text-xs text-gray-400 uppercase">Secret Key</div>
+                        <div class="text-xs font-mono text-gray-500 break-all select-all blur-sm hover:blur-none transition-all cursor-pointer" title="Hover to reveal">${job.secret_key}</div>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-2">
+                    <div class="flex items-center ${statusColor} font-bold text-sm">
+                        ${statusIcon} ${job.status}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        ${job.created_at && job.created_at.toDate ? job.created_at.toDate().toLocaleString() : ''}
+                    </div>
+                </div>
+                <div class="text-sm text-gray-300 mb-1">
+                    <span class="font-mono bg-gray-800 px-1 rounded text-gray-200">${prefix}</span> ... <span class="font-mono bg-gray-800 px-1 rounded text-gray-200">${suffix}</span>
+                    <span class="text-xs text-gray-500 ml-1">${caseFlag}</span>
+                </div>
+                ${resultHTML}
+            `;
+            container.appendChild(card);
+        }
+
+        // --- Estimator ---
+        const prefixInput = document.getElementById('prefix');
+        const suffixInput = document.getElementById('suffix');
+        const estimatesDiv = document.getElementById('estimates');
+
+        function updateEstimates() {
+            const p = prefixInput.value || "";
+            const s = suffixInput.value || "";
+            const totalLen = p.length + s.length;
+
+            if (totalLen === 0) {
+                estimatesDiv.innerHTML = "";
+                return;
+            }
+
+            // Estimate logic based on memory
+            // Time = (0.5 * 58^L) / 5,000,000
+            const difficulty = Math.pow(58, totalLen);
+            const speed = 5000000;
+            const seconds = (0.5 * difficulty) / speed;
+
+            let timeString = "";
+            if (seconds < 0.01) timeString = "Instant";
+            else if (seconds < 60) timeString = seconds.toFixed(2) + " seconds";
+            else if (seconds < 3600) timeString = (seconds / 60).toFixed(1) + " minutes";
+            else if (seconds < 86400) timeString = (seconds / 3600).toFixed(1) + " hours";
+            else timeString = (seconds / 86400).toFixed(1) + " days";
+
+            estimatesDiv.innerHTML = `
+                <div class="flex items-baseline space-x-2">
+                    <span class="text-gray-400">Est. Time:</span>
+                    <span class="text-purple-400 font-bold">${timeString}</span>
+                    <span class="text-gray-600 text-xs">(length: ${totalLen})</span>
+                </div>
+            `;
+        }
+
+        prefixInput.addEventListener('input', updateEstimates);
+        suffixInput.addEventListener('input', updateEstimates);
+
+        // Expose functions globally for HTML attributes
+        window.connectWallet = connectWallet;
+        window.handleDevLogin = handleDevLogin;
+        window.startGeneration = startGeneration;
+    </script>
+</body>
+</html>
