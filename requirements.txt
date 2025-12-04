@@ -7,3 +7,4 @@ pynacl==1.5.0
 base58==2.1.1
 solders
 cryptography
+# Force rebuild
