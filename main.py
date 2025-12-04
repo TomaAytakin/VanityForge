@@ -44,7 +44,7 @@ def add_cors_headers(response):
 
 @app.route('/submit-job', methods=['POST', 'OPTIONS'])
 def submit_job():
-    # CORS preflight handling
+    # CORS preflight handling (Explicitly handled for Cloud Run)
     if request.method == 'OPTIONS':
         # Return 204 No Content for preflight handshake to pass
         # Headers are automatically added by @app.after_request
