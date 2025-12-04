@@ -5,3 +5,4 @@ google-cloud-firestore
 base58
 cryptography
 solana
+flask-cors
