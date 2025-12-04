@@ -1,0 +1,11 @@
+resource-name: pubsub-to-grinder-final
+region: europe-west1
+service-account: service-124272129554@gcp-sa-eventarc.iam.gserviceaccount.com
+destination:
+  cloud-run-job: grinder-worker-final
+  region: europe-west1
+event-filters:
+  - attribute: type
+    value: google.cloud.pubsub.topic.v1.messagePublished
+  - attribute: topic
+    value: vanity-grind-jobs
