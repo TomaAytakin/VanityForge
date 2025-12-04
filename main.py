@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 
 # Configuration
+# Verified: GCP_PROJECT_ID and PUBSUB_TOPIC_ID match Cloud Run settings.
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "vanityforge")
 TOPIC_ID = os.environ.get("PUBSUB_TOPIC_ID", "vanity-grind-jobs")
 JOB_COLLECTION = 'vanity_jobs'

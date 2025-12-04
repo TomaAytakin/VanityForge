@@ -66,6 +66,7 @@
 
     <script>
         // --- Firebase Config ---
+        // Cleaned up config to prevent nested declarations
         const firebaseConfig = {
           apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
           authDomain: "vanityforge.firebaseapp.com",
@@ -76,13 +77,21 @@
           measurementId: "G-97FJY9VP2K"
         };
 
-        // Initialize Firebase (Try/Catch to prevent crash if config is missing)
+        // Initialize Firebase
         let db;
         try {
-            firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
+            if (typeof firebase !== 'undefined') {
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(firebaseConfig);
+                } else {
+                    firebase.app(); // if already initialized, use that one
+                }
+                db = firebase.firestore();
+            } else {
+                 console.warn("Firebase SDK not loaded.");
+            }
         } catch (e) {
-            console.warn("Firebase not initialized. Replace placeholder config.");
+            console.warn("Firebase initialization failed:", e);
         }
 
         // --- State ---
