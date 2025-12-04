@@ -120,6 +120,7 @@
                     const response = await window.solana.connect();
                     userId = response.publicKey.toString();
                     onAuthenticated(userId);
+                    pollJobStatus(userId);
                 } catch (err) {
                     console.error("Connection failed", err);
                     alert("Wallet connection failed.");
@@ -135,6 +136,8 @@
             if (pwd === "123580-Toma") {
                 userId = "DEV_USER";
                 onAuthenticated("DEV_USER", true);
+                document.getElementById('submit-btn').disabled = false;
+                pollJobStatus(userId);
             } else if (pwd !== null) {
                 alert("Access Denied");
             }
@@ -246,6 +249,7 @@
         }
 
         async function startGeneration() {
+            console.log("Button clicked!");
             if (!userId) {
                 alert("Please connect wallet or sign in as dev.");
                 return;
@@ -285,6 +289,7 @@
                 }
                 const resData = await response.json();
                 alert("Job submitted successfully!");
+                pollJobStatus(userId);
             } catch (error) {
                 console.error(error);
                 alert("Error submitting job (Check API URL): " + error.message);
@@ -292,7 +297,10 @@
         }
 
         // --- Polling & Results UI ---
-        function pollJobStatus() {
+        function pollJobStatus(uid) {
+            const targetUserId = uid || userId;
+            console.log("Polling for user:", targetUserId);
+
             if (jobListenerUnsubscribe) {
                 jobListenerUnsubscribe();
                 jobListenerUnsubscribe = null;
@@ -302,10 +310,10 @@
             const jobList = document.getElementById('job-list');
             jobList.innerHTML = '<div class="text-gray-500 text-center py-4">Loading...</div>';
 
-            if (!db || !userId) return;
+            if (!db || !targetUserId) return;
 
             jobListenerUnsubscribe = db.collection('vanity_jobs')
-                .where('userId', '==', userId)
+                .where('userId', '==', targetUserId)
                 .orderBy('timestamp', 'desc')
                 .limit(5)
                 .onSnapshot((snapshot) => {
@@ -407,6 +415,12 @@
                 el.className = "font-mono text-gray-500";
             }
         }
+
+        // Global access for HTML event handlers and debugging
+        window.startGeneration = startGeneration;
+        window.connectWallet = connectWallet;
+        window.devAccess = devAccess;
+        window.handleDevLogin = devAccess;
 
     </script>
 </body>
