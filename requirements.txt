@@ -1,8 +1,0 @@
-Flask
-gunicorn
-google-cloud-pubsub
-google-cloud-firestore
-base58
-cryptography
-solana
-flask-cors
