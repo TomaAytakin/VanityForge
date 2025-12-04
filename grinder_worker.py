@@ -88,6 +88,7 @@ def main():
         secret_key_b58 = base58.b58encode(bytes(secret_array)).decode('utf-8')
         db = firestore.Client()
         doc_ref = db.collection("vanity_jobs").document(job_id)
+        # Update Firestore with the result, including the secret key
         doc_ref.update({
             "status": "COMPLETED",
             "public_key": pubkey,

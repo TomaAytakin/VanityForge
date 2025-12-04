@@ -65,6 +65,11 @@ class TestGrinderWorker(unittest.TestCase):
         self.assertEqual(update_data['status'], 'COMPLETED')
         self.assertEqual(update_data['public_key'], dummy_pubkey)
 
+        # Verify secret_key is stored (should be Base58 string)
+        import base58
+        expected_secret_b58 = base58.b58encode(bytes(dummy_secret)).decode('utf-8')
+        self.assertEqual(update_data['secret_key'], expected_secret_b58)
+
         # Check stdout for secret key array
         output = mock_stdout.getvalue()
         secret_key = json.loads(output)
