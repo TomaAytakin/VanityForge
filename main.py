@@ -45,7 +45,10 @@ def validate_input(data):
 @app.route('/submit-job', methods=['POST'])
 def submit_job():
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
+        if not data:
+            return jsonify({"error": "Invalid or empty JSON body"}), 400
+
         is_valid, error_msg = validate_input(data)
         if not is_valid:
             return jsonify({"error": error_msg}), 400
