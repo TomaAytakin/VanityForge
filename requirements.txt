@@ -2,5 +2,5 @@ Flask
 gunicorn
 google-cloud-pubsub
 google-cloud-firestore
-pybase58
+base58
 cryptography
