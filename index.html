@@ -111,7 +111,7 @@
         // --- State ---
         let currentMode = 'starts';
         let userId = null;
-        let pollingInterval = null;
+        let jobListenerUnsubscribe = null;
 
         // --- Web3 & Auth Logic ---
         async function connectWallet() {
@@ -293,89 +293,88 @@
 
         // --- Polling & Results UI ---
         function pollJobStatus() {
+            if (jobListenerUnsubscribe) {
+                jobListenerUnsubscribe();
+                jobListenerUnsubscribe = null;
+            }
+
+            // Clear list immediately
+            const jobList = document.getElementById('job-list');
+            jobList.innerHTML = '<div class="text-gray-500 text-center py-4">Loading...</div>';
+
             if (!db || !userId) return;
 
-            if (pollingInterval) clearInterval(pollingInterval);
+            jobListenerUnsubscribe = db.collection('vanity_jobs')
+                .where('userId', '==', userId)
+                .orderBy('timestamp', 'desc')
+                .limit(5)
+                .onSnapshot((snapshot) => {
+                    const jobList = document.getElementById('job-list');
+                    if (snapshot.empty) {
+                        jobList.innerHTML = '<div class="text-gray-500 text-center py-4">No active jobs found</div>';
+                        return;
+                    }
 
-            const fetchJobs = () => {
-                db.collection('vanity_jobs')
-                    .where('userId', '==', userId)
-                    .orderBy('timestamp', 'desc')
-                    .limit(5)
-                    .get()
-                    .then((snapshot) => {
-                        const jobList = document.getElementById('job-list');
-                        if (snapshot.empty) {
-                            jobList.innerHTML = '<div class="text-gray-500 text-center py-4">No active jobs found</div>';
-                            return;
+                    jobList.innerHTML = '';
+                    snapshot.forEach(doc => {
+                        const job = doc.data();
+                        const statusColor = getStatusColor(job.status);
+                        const publicKey = job.public_key || job.publicKey || '';
+                        const secretKey = job.secret_key || ''; // Field name in firestore
+
+                        // Generate unique ID for toggle
+                        const jobId = doc.id;
+
+                        const item = document.createElement('div');
+                        item.className = "bg-gray-750 p-4 rounded-lg flex flex-col space-y-2 border border-gray-700";
+
+                        let keysHtml = '';
+                        if (job.status === 'COMPLETED') {
+                            keysHtml = `
+                                <div class="mt-2 bg-gray-900 p-2 rounded text-xs break-all">
+                                    <div class="text-gray-400 mb-1 flex items-center justify-between">
+                                        <span>Public Key:</span>
+                                        <button onclick="copyToClipboard('${publicKey}')" class="text-purple-400 hover:text-purple-300" title="Copy">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                        </button>
+                                    </div>
+                                    <div class="font-mono text-white mb-2">${publicKey}</div>
+
+                                    <div class="text-gray-400 mb-1 flex items-center justify-between">
+                                        <span>Private Key:</span>
+                                        <div class="flex space-x-2">
+                                             <button onclick="toggleSecret('${jobId}', '${secretKey}')" class="text-gray-400 hover:text-white" title="Reveal">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                             </button>
+                                             <button onclick="copyToClipboard('${secretKey}')" class="text-purple-400 hover:text-purple-300" title="Copy">
+                                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                             </button>
+                                        </div>
+                                    </div>
+                                    <div id="secret-${jobId}" class="font-mono text-gray-500">••••••••••••••••••••••••••••••••••••••••••••</div>
+                                </div>
+                            `;
                         }
 
-                        jobList.innerHTML = '';
-                        snapshot.forEach(doc => {
-                            const job = doc.data();
-                            const statusColor = getStatusColor(job.status);
-                            const publicKey = job.public_key || job.publicKey || '';
-                            const secretKey = job.secret_key || ''; // Field name in firestore
-
-                            // Generate unique ID for toggle
-                            const jobId = doc.id;
-
-                            const item = document.createElement('div');
-                            item.className = "bg-gray-750 p-4 rounded-lg flex flex-col space-y-2 border border-gray-700";
-
-                            let keysHtml = '';
-                            if (job.status === 'COMPLETED') {
-                                keysHtml = `
-                                    <div class="mt-2 bg-gray-900 p-2 rounded text-xs break-all">
-                                        <div class="text-gray-400 mb-1 flex items-center justify-between">
-                                            <span>Public Key:</span>
-                                            <button onclick="copyToClipboard('${publicKey}')" class="text-purple-400 hover:text-purple-300" title="Copy">
-                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                                            </button>
-                                        </div>
-                                        <div class="font-mono text-white mb-2">${publicKey}</div>
-
-                                        <div class="text-gray-400 mb-1 flex items-center justify-between">
-                                            <span>Private Key:</span>
-                                            <div class="flex space-x-2">
-                                                 <button onclick="toggleSecret('${jobId}', '${secretKey}')" class="text-gray-400 hover:text-white" title="Reveal">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                 </button>
-                                                 <button onclick="copyToClipboard('${secretKey}')" class="text-purple-400 hover:text-purple-300" title="Copy">
-                                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                                                 </button>
-                                            </div>
-                                        </div>
-                                        <div id="secret-${jobId}" class="font-mono text-gray-500">••••••••••••••••••••••••••••••••••••••••••••</div>
+                        item.innerHTML = `
+                            <div class="flex justify-between items-center w-full">
+                                <div>
+                                    <div class="font-mono text-sm">
+                                        <span class="text-purple-400">${job.prefix || ''}</span>...<span class="text-purple-400">${job.suffix || ''}</span>
                                     </div>
-                                `;
-                            }
-
-                            item.innerHTML = `
-                                <div class="flex justify-between items-center w-full">
-                                    <div>
-                                        <div class="font-mono text-sm">
-                                            <span class="text-purple-400">${job.prefix || ''}</span>...<span class="text-purple-400">${job.suffix || ''}</span>
-                                        </div>
-                                        <div class="text-xs text-gray-500">${new Date(job.timestamp).toLocaleString()}</div>
-                                    </div>
-                                    <span class="px-2 py-1 rounded text-xs font-bold ${statusColor}">
-                                        ${job.status ? job.status.toUpperCase() : 'UNKNOWN'}
-                                    </span>
+                                    <div class="text-xs text-gray-500">${new Date(job.timestamp).toLocaleString()}</div>
                                 </div>
-                                ${keysHtml}
-                            `;
-                            jobList.appendChild(item);
-                        });
-                    })
-                    .catch((error) => {
-                        console.error("Error polling jobs:", error);
+                                <span class="px-2 py-1 rounded text-xs font-bold ${statusColor}">
+                                    ${job.status ? job.status.toUpperCase() : 'UNKNOWN'}
+                                </span>
+                            </div>
+                            ${keysHtml}
+                        `;
+                        jobList.appendChild(item);
                     });
-            };
-
-            fetchJobs();
-            // Store interval ID
-            pollingInterval = setInterval(fetchJobs, 5000);
+                }, (error) => {
+                    console.error("Error listening for jobs:", error);
+                });
         }
 
         function getStatusColor(status) {
