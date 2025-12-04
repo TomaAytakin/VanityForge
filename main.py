@@ -2,7 +2,8 @@ import os
 import json
 import logging
 import datetime
-from flask import Flask, request, jsonify
+import uuid
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from google.cloud import pubsub_v1
 from google.cloud import firestore
@@ -33,59 +34,68 @@ except Exception as e:
 def health_check():
     return "Dispatcher Service Operational", 200
 
-@app.route('/submit-job', methods=['POST'])
+@app.after_request
+def add_cors_headers(response):
+    # This ensures all responses (including the main POST) have the necessary headers
+    response.headers['Access-Control-Allow-Origin'] = 'https://tomaaytakin.github.io'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+    return response
+
+@app.route('/submit-job', methods=['POST', 'OPTIONS'])
 def submit_job():
+    # CORS preflight handling
+    if request.method == 'OPTIONS':
+        # Return 204 No Content for preflight handshake to pass
+        # Headers are automatically added by @app.after_request
+        return '', 204
+
     # JSON Crash Fix: handle empty or malformed JSON
     data = request.get_json(silent=True) or {}
-
     if not data:
         return jsonify({'error': 'Invalid or empty JSON body'}), 400
 
-    user_id = data.get('user_id')
+    # --- Application Logic ---
+    user_id = data.get('userId') # Note: using 'userId' from frontend, not 'user_id'
     prefix = data.get('prefix')
+    suffix = data.get('suffix', '') # Suffix is optional
 
-    if not user_id or not prefix:
-        return jsonify({'error': 'Missing required fields: user_id, prefix'}), 400
+    if not user_id or (not prefix and not suffix):
+        return jsonify({'error': 'Missing required fields: user ID and either prefix or suffix.'}), 400
 
-    # Create a unique job ID
-    timestamp = int(datetime.datetime.now().timestamp())
-    job_id = f"job_{user_id}_{timestamp}"
+    # Generate simple unique ID
+    job_id = str(uuid.uuid4())
 
-    # Prepare data for Firestore
     firestore_data = {
         'job_id': job_id,
         'user_id': user_id,
         'prefix': prefix,
-        'status': 'queued',
+        'suffix': suffix,
+        'status': 'QUEUED',
+        'cost': data.get('cost', 0),
         'created_at': firestore.SERVER_TIMESTAMP
     }
 
-    # Prepare data for Pub/Sub (needs JSON serializable fields)
     pubsub_data = {
         'job_id': job_id,
-        'user_id': user_id,
         'prefix': prefix,
-        'created_at': datetime.datetime.now().isoformat()
+        'suffix': suffix,
+        'user_id': user_id
     }
 
     try:
-        # Save to Firestore
-        if db:
-            db.collection('vanity_jobs').document(job_id).set(firestore_data)
-
-        # Publish to Pub/Sub
-        if publisher and topic_path:
-            data_str = json.dumps(pubsub_data)
-            data_bytes = data_str.encode('utf-8')
-            publish_future = publisher.publish(topic_path, data=data_bytes)
-            # Wait for the publish to complete
-            publish_future.result()
-
-        return jsonify({'message': 'Job submitted successfully', 'job_id': job_id}), 200
-
+        # Save Job Status to Firestore (The frontend reads this list)
+        db.collection('vanity_jobs').document(job_id).set(firestore_data)
+        # Publish message to Pub/Sub (The worker picks this up)
+        data_str = json.dumps(pubsub_data)
+        data_bytes = data_str.encode('utf-8')
+        publish_future = publisher.publish(topic_path, data=data_bytes)
+        publish_future.result() # Wait for publish confirmation
+        return jsonify({'message': 'Job submitted successfully', 'job_id': job_id}), 202
     except Exception as e:
-        logging.error(f"Error processing job: {e}")
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"Error processing job {job_id}: {e}")
+        # If Pub/Sub fails (e.g., topic doesn't exist), return a 500
+        return jsonify({'error': 'Internal Server Error during Queue submission. Check Cloud Pub/Sub Topic.'}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8080))
