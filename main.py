@@ -4,7 +4,6 @@ import logging
 import datetime
 import uuid
 from flask import Flask, request, jsonify, make_response
-from flask_cors import CORS
 from google.cloud import pubsub_v1
 from google.cloud import firestore
 
@@ -13,9 +12,6 @@ PROJECT_ID = 'vanityforge'
 TOPIC_ID = 'vanity-grind-jobs'
 
 app = Flask(__name__)
-
-# CORS Fix: Enable CORS
-CORS(app)
 
 # Initialize Google Cloud Clients
 # We wrap in try/except to avoid crashing locally if creds are missing,
