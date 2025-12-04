@@ -1,0 +1,6 @@
+Flask
+gunicorn
+google-cloud-pubsub
+google-cloud-firestore
+pybase58
+cryptography
