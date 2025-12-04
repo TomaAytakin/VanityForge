@@ -5,3 +5,4 @@ google-cloud-firestore==2.14.0
 gunicorn==21.2.0
 base58
 solders
+cryptography
