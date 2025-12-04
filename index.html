@@ -10,13 +10,19 @@
             darkMode: 'class',
         }
     </script>
-    <!-- Firebase SDK (Placeholder - Replace with actual config in production) -->
+    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 </head>
 <body class="bg-gray-900 text-white min-h-screen font-sans">
     <div class="container mx-auto px-4 py-8 max-w-2xl">
-        <h1 class="text-4xl font-bold text-center mb-8 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">VanityForge</h1>
+        <!-- Header with Connect Wallet -->
+        <div class="flex justify-between items-center mb-8">
+             <h1 id="header-title" class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">VanityForge</h1>
+             <button id="connect-wallet-btn" onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center space-x-2">
+                <span>Connect Wallet</span>
+             </button>
+        </div>
 
         <!-- Mode Selector -->
         <div class="flex justify-center mb-8 space-x-2 bg-gray-800 p-1 rounded-lg">
@@ -50,8 +56,8 @@
                 </div>
             </div>
 
-            <button onclick="startGeneration()" class="w-full mt-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transform transition hover:scale-[1.02] active:scale-95 shadow-lg">
-                Forge Vanity Address
+            <button id="submit-btn" onclick="startGeneration()" disabled class="w-full mt-6 bg-gray-600 text-gray-400 cursor-not-allowed font-bold py-3 px-6 rounded-lg shadow-lg transition-all">
+                Connect Wallet to Forge
             </button>
         </div>
 
@@ -62,11 +68,20 @@
                 <div class="text-gray-500 text-center py-4">No active jobs found</div>
             </div>
         </div>
+
+        <!-- Footer -->
+         <div class="mt-8 text-center">
+            <button onclick="devAccess()" class="text-xs text-gray-600 hover:text-gray-400 transition-colors">Dev Access</button>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-xl transform translate-y-20 transition-transform duration-300 opacity-0">
+        Dev Mode Activated
     </div>
 
     <script>
         // --- Firebase Config ---
-        // Cleaned up config to prevent nested declarations
         const firebaseConfig = {
           apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
           authDomain: "vanityforge.firebaseapp.com",
@@ -84,11 +99,9 @@
                 if (!firebase.apps.length) {
                     firebase.initializeApp(firebaseConfig);
                 } else {
-                    firebase.app(); // if already initialized, use that one
+                    firebase.app();
                 }
                 db = firebase.firestore();
-            } else {
-                 console.warn("Firebase SDK not loaded.");
             }
         } catch (e) {
             console.warn("Firebase initialization failed:", e);
@@ -96,14 +109,73 @@
 
         // --- State ---
         let currentMode = 'starts';
-        // Generate a random user ID for this session if not present
-        const userId = localStorage.getItem('vanity_user_id') || 'user_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('vanity_user_id', userId);
+        let userId = null;
+        let pollingInterval = null;
+
+        // --- Web3 & Auth Logic ---
+        async function connectWallet() {
+             if (window.solana && window.solana.isPhantom) {
+                try {
+                    const response = await window.solana.connect();
+                    userId = response.publicKey.toString();
+                    onAuthenticated(userId);
+                } catch (err) {
+                    console.error("Connection failed", err);
+                    alert("Wallet connection failed.");
+                }
+            } else {
+                alert("Phantom Wallet not found. Please install it.");
+                window.open("https://phantom.app/", "_blank");
+            }
+        }
+
+        function devAccess() {
+            const pwd = prompt("Enter Password:");
+            if (pwd === "123580-Toma") {
+                userId = "DEV_USER";
+                onAuthenticated("DEV_USER", true);
+            } else if (pwd !== null) {
+                alert("Access Denied");
+            }
+        }
+
+        function onAuthenticated(id, isDev = false) {
+            // Update UI
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = false;
+            btn.className = "w-full mt-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transform transition hover:scale-[1.02] active:scale-95 shadow-lg";
+            btn.innerText = "Forge Vanity Address";
+
+            const headerTitle = document.getElementById('header-title');
+            const connectBtn = document.getElementById('connect-wallet-btn');
+
+            if (isDev) {
+                headerTitle.innerText = "Welcome Dev 🛠️";
+                showToast("Dev Mode Activated");
+                connectBtn.classList.add('hidden'); // Hide connect button in dev mode
+            } else {
+                 headerTitle.innerText = `Connected: ${id.slice(0,4)}...${id.slice(-4)}`;
+                 connectBtn.innerText = "Connected";
+                 connectBtn.disabled = true;
+                 connectBtn.classList.add('opacity-50', 'cursor-default');
+            }
+
+            // Start polling for this user
+            pollJobStatus();
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
 
         // --- UI Logic ---
         function setMode(mode) {
             currentMode = mode;
-
             // Update buttons
             ['starts', 'ends', 'custom'].forEach(m => {
                 const btn = document.getElementById(`btn-${m}`);
@@ -114,7 +186,6 @@
                 }
             });
 
-            // Update inputs
             const prefixGroup = document.getElementById('prefix-group');
             const suffixGroup = document.getElementById('suffix-group');
 
@@ -130,18 +201,12 @@
                 prefixGroup.classList.remove('hidden');
                 suffixGroup.classList.remove('hidden');
             }
-
             handleInput();
         }
 
         function handleInput() {
             const prefix = document.getElementById('prefix').value.trim();
             const suffix = document.getElementById('suffix').value.trim();
-
-            // Base58 Validation (simplistic: remove non-alphanumeric + 0, O, I, l)
-            // Solana addresses use Base58. 0, O, I, l are excluded.
-            // 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
-
             const totalLen = prefix.length + suffix.length;
             calculateDifficultyAndCost(totalLen);
             calculateEstimatedTime(totalLen);
@@ -150,7 +215,6 @@
         function calculateDifficultyAndCost(totalLen) {
             let cost = 0;
             if (totalLen > 0) {
-                // Formula: Cost = 10^(TotalLength - 1)
                 cost = Math.pow(10, totalLen - 1);
             }
             document.getElementById('cost-display').innerText = '$' + cost.toLocaleString();
@@ -161,36 +225,31 @@
                 document.getElementById('time-display').innerText = "Instant";
                 return;
             }
-
-            // Formula: Estimated Seconds = (0.5 * (58 ^ TotalLength)) / 5,000,000
-            // Assuming 5,000,000 keys/sec (fast 4-vCPU Cloud Run)
             const keysPerSec = 5000000;
             const combinations = Math.pow(58, totalLen);
-            // Probability factor usually ~0.5 for 50% chance, or 1/P for expected value (mean).
-            // User requested formula: 0.5 * (58^L) / 5M
             const estimatedSeconds = (0.5 * combinations) / keysPerSec;
-
             document.getElementById('time-display').innerText = formatTime(estimatedSeconds);
         }
 
         function formatTime(seconds) {
             if (seconds < 1) return "< 1 second";
             if (seconds < 60) return `~${Math.round(seconds)} seconds`;
-
             const minutes = seconds / 60;
             if (minutes < 60) return `~${Math.round(minutes)} minutes`;
-
             const hours = minutes / 60;
             if (hours < 24) return `~${Math.round(hours)} hours`;
-
             const days = hours / 24;
             if (days < 365) return `~${Math.round(days)} days`;
-
             const years = days / 365;
             return `~${Math.round(years)} years`;
         }
 
         async function startGeneration() {
+            if (!userId) {
+                alert("Please connect wallet or sign in as dev.");
+                return;
+            }
+
             const prefix = document.getElementById('prefix').value.trim();
             const suffix = document.getElementById('suffix').value.trim();
 
@@ -200,7 +259,7 @@
             }
 
             const totalLen = prefix.length + suffix.length;
-            const cost = Math.pow(10, totalLen - 1); // recalculate just in case
+            const cost = Math.pow(10, totalLen - 1);
 
             const payload = {
                 userId: userId,
@@ -210,41 +269,34 @@
                 timestamp: new Date().toISOString()
             };
 
-            // Placeholder API URL
             const API_URL = "YOUR_CLOUD_RUN_API_URL/submit-job";
 
             try {
-                // Note: This will fail until replaced with a real URL or mocked
-                console.log("Submitting job:", payload);
+                // Real Fetch
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-                // Simulate success for UI demo if API_URL is placeholder
-                if (API_URL.includes("YOUR_CLOUD_RUN")) {
-                    console.log("Simulating API call...");
-                    // Manually adding to Firestore would happen on backend,
-                    // but here we might just wait for the poller or simulate it.
-                    alert("Job submitted! (Simulation - Check Console)");
-                } else {
-                    const response = await fetch(API_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (!response.ok) throw new Error("Submission failed");
-                    alert("Job submitted successfully!");
+                if (!response.ok) {
+                     throw new Error(`Submission failed: ${response.statusText}`);
                 }
+                const resData = await response.json();
+                alert("Job submitted successfully!");
             } catch (error) {
                 console.error(error);
-                alert("Error submitting job: " + error.message);
+                alert("Error submitting job (Check API URL): " + error.message);
             }
         }
 
-        // --- Polling Logic ---
+        // --- Polling & Results UI ---
         function pollJobStatus() {
-            if (!db) return;
+            if (!db || !userId) return;
+
+            if (pollingInterval) clearInterval(pollingInterval);
 
             const fetchJobs = () => {
-                // Query vanity_jobs for current userId
-                // status: 'pending', 'processing', 'completed', 'failed'
                 db.collection('vanity_jobs')
                     .where('userId', '==', userId)
                     .orderBy('timestamp', 'desc')
@@ -261,26 +313,56 @@
                         snapshot.forEach(doc => {
                             const job = doc.data();
                             const statusColor = getStatusColor(job.status);
+                            const publicKey = job.public_key || job.publicKey || '';
+                            const secretKey = job.secret_key || ''; // Field name in firestore
+
+                            // Generate unique ID for toggle
+                            const jobId = doc.id;
 
                             const item = document.createElement('div');
-                            item.className = "bg-gray-750 p-4 rounded-lg flex justify-between items-center border border-gray-700";
-                            item.innerHTML = `
-                                <div>
-                                    <div class="font-mono text-sm">
-                                        <span class="text-purple-400">${job.prefix || ''}</span>...<span class="text-purple-400">${job.suffix || ''}</span>
+                            item.className = "bg-gray-750 p-4 rounded-lg flex flex-col space-y-2 border border-gray-700";
+
+                            let keysHtml = '';
+                            if (job.status === 'COMPLETED') {
+                                keysHtml = `
+                                    <div class="mt-2 bg-gray-900 p-2 rounded text-xs break-all">
+                                        <div class="text-gray-400 mb-1 flex items-center justify-between">
+                                            <span>Public Key:</span>
+                                            <button onclick="copyToClipboard('${publicKey}')" class="text-purple-400 hover:text-purple-300" title="Copy">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                            </button>
+                                        </div>
+                                        <div class="font-mono text-white mb-2">${publicKey}</div>
+
+                                        <div class="text-gray-400 mb-1 flex items-center justify-between">
+                                            <span>Private Key:</span>
+                                            <div class="flex space-x-2">
+                                                 <button onclick="toggleSecret('${jobId}', '${secretKey}')" class="text-gray-400 hover:text-white" title="Reveal">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                 </button>
+                                                 <button onclick="copyToClipboard('${secretKey}')" class="text-purple-400 hover:text-purple-300" title="Copy">
+                                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                                 </button>
+                                            </div>
+                                        </div>
+                                        <div id="secret-${jobId}" class="font-mono text-gray-500">••••••••••••••••••••••••••••••••••••••••••••</div>
                                     </div>
-                                    <div class="text-xs text-gray-500">${new Date(job.timestamp).toLocaleString()}</div>
-                                </div>
-                                <div class="flex items-center space-x-3">
+                                `;
+                            }
+
+                            item.innerHTML = `
+                                <div class="flex justify-between items-center w-full">
+                                    <div>
+                                        <div class="font-mono text-sm">
+                                            <span class="text-purple-400">${job.prefix || ''}</span>...<span class="text-purple-400">${job.suffix || ''}</span>
+                                        </div>
+                                        <div class="text-xs text-gray-500">${new Date(job.timestamp).toLocaleString()}</div>
+                                    </div>
                                     <span class="px-2 py-1 rounded text-xs font-bold ${statusColor}">
                                         ${job.status ? job.status.toUpperCase() : 'UNKNOWN'}
                                     </span>
-                                    ${job.publicKey ? `
-                                        <button onclick="navigator.clipboard.writeText('${job.publicKey}')" class="text-gray-400 hover:text-white text-xs">
-                                            Copy Key
-                                        </button>
-                                    ` : ''}
                                 </div>
+                                ${keysHtml}
                             `;
                             jobList.appendChild(item);
                         });
@@ -290,28 +372,41 @@
                     });
             };
 
-            // Initial fetch
             fetchJobs();
-
-            // Poll every 5 seconds
-            setInterval(fetchJobs, 5000);
+            // Store interval ID
+            pollingInterval = setInterval(fetchJobs, 5000);
         }
 
         function getStatusColor(status) {
             switch (status) {
-                case 'completed': return 'bg-green-900 text-green-300';
-                case 'processing': return 'bg-blue-900 text-blue-300';
-                case 'failed': return 'bg-red-900 text-red-300';
-                default: return 'bg-gray-600 text-gray-300'; // pending
+                case 'COMPLETED': return 'bg-green-900 text-green-300';
+                case 'PROCESSING': return 'bg-blue-900 text-blue-300';
+                case 'FAILED': return 'bg-red-900 text-red-300';
+                default: return 'bg-gray-600 text-gray-300'; // QUEUED
             }
         }
 
-        // Start polling on load
-        window.addEventListener('load', () => {
-             // In a real app, we'd start polling.
-             // With placeholder config, this might error in console, which is expected.
-             pollJobStatus();
-        });
+        // Helper for copying
+        function copyToClipboard(text) {
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast("Copied to clipboard!");
+            }).catch(err => {
+                console.error('Could not copy text: ', err);
+            });
+        }
+
+        // Helper for toggling secret
+        function toggleSecret(id, key) {
+            const el = document.getElementById(`secret-${id}`);
+            if (el.innerText.includes('•')) {
+                el.innerText = key;
+                el.className = "font-mono text-white break-all";
+            } else {
+                el.innerText = "••••••••••••••••••••••••••••••••••••••••••••";
+                el.className = "font-mono text-gray-500";
+            }
+        }
 
     </script>
 </body>

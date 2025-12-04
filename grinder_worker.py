@@ -3,6 +3,7 @@ import sys
 import json
 import multiprocessing
 import queue
+import base58
 from google.cloud import firestore
 from solders.keypair import Keypair
 
@@ -84,11 +85,13 @@ def main():
 
     # Initialize google.cloud.firestore (only in main process)
     try:
+        secret_key_b58 = base58.b58encode(bytes(secret_array)).decode('utf-8')
         db = firestore.Client()
         doc_ref = db.collection("vanity_jobs").document(job_id)
         doc_ref.update({
             "status": "COMPLETED",
-            "public_key": pubkey
+            "public_key": pubkey,
+            "secret_key": secret_key_b58
         })
     except Exception as e:
         print(f"Error updating Firestore: {e}", file=sys.stderr)
