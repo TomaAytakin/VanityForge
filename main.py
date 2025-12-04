@@ -24,8 +24,8 @@ except Exception as e:
     print(f"Warning: Clients failed to initialize (Local dev?): {e}")
 
 def validate_input(data):
-    if not data:
-        return False, "No data provided"
+    if not data or not isinstance(data, dict):
+        return False, "No data provided or invalid format"
     
     # Check if at least one constraint exists
     prefix = data.get('prefix', '')
@@ -45,7 +45,12 @@ def validate_input(data):
 @app.route('/submit-job', methods=['POST'])
 def submit_job():
     try:
-        data = request.json
+        # Use get_json(silent=True) to avoid 415/400 exceptions for invalid Content-Type or JSON
+        data = request.get_json(silent=True)
+
+        if data is None:
+             return jsonify({"error": "Invalid JSON or Content-Type"}), 400
+
         is_valid, error_msg = validate_input(data)
         if not is_valid:
             return jsonify({"error": error_msg}), 400
