@@ -51,7 +51,7 @@ def submit_job():
     if not data:
         return jsonify({'error': 'Invalid or empty JSON body'}), 400
     # --- Application Logic ---
-    user_id = data.get('userId')
+    user_id = data.get('userId') or data.get('user_id')
     prefix = data.get('prefix')
     suffix = data.get('suffix', '')
     if not user_id or (not prefix and not suffix):
