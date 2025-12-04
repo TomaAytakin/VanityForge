@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VanityForge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <!-- Firebase SDK (Placeholder - Replace with actual config in production) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen font-sans">
+    <div class="container mx-auto px-4 py-8 max-w-2xl">
+        <h1 class="text-4xl font-bold text-center mb-8 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">VanityForge</h1>
+
+        <!-- Mode Selector -->
+        <div class="flex justify-center mb-8 space-x-2 bg-gray-800 p-1 rounded-lg">
+            <button onclick="setMode('starts')" id="btn-starts" class="flex-1 px-4 py-2 rounded-md transition-colors bg-purple-600 text-white">Starts With</button>
+            <button onclick="setMode('ends')" id="btn-ends" class="flex-1 px-4 py-2 rounded-md transition-colors hover:bg-gray-700">Ends With</button>
+            <button onclick="setMode('custom')" id="btn-custom" class="flex-1 px-4 py-2 rounded-md transition-colors hover:bg-gray-700">Custom (Both)</button>
+        </div>
+
+        <!-- Input Fields -->
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg mb-8">
+            <div id="input-container" class="space-y-4">
+                <div id="prefix-group">
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Prefix</label>
+                    <input type="text" id="prefix" maxlength="6" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-colors uppercase" placeholder="ABC" oninput="handleInput()">
+                </div>
+                <div id="suffix-group" class="hidden">
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Suffix</label>
+                    <input type="text" id="suffix" maxlength="6" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-colors uppercase" placeholder="XYZ" oninput="handleInput()">
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="mt-6 pt-6 border-t border-gray-700 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-gray-750 rounded p-3">
+                    <div class="text-gray-400 text-sm">Estimated Cost</div>
+                    <div id="cost-display" class="text-2xl font-bold text-green-400">$0</div>
+                </div>
+                <div class="bg-gray-750 rounded p-3">
+                    <div class="text-gray-400 text-sm">Estimated Time</div>
+                    <div id="time-display" class="text-xl font-bold text-blue-400">Instant</div>
+                </div>
+            </div>
+
+            <button onclick="startGeneration()" class="w-full mt-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transform transition hover:scale-[1.02] active:scale-95 shadow-lg">
+                Forge Vanity Address
+            </button>
+        </div>
+
+        <!-- Job Status -->
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg">
+            <h2 class="text-xl font-semibold mb-4 text-gray-200">Recent Jobs</h2>
+            <div id="job-list" class="space-y-3">
+                <div class="text-gray-500 text-center py-4">No active jobs found</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Firebase Config (Placeholder) ---
+        const firebaseConfig = {
+            // TODO: Add your Firebase configuration here
+            apiKey: "API_KEY",
+            authDomain: "PROJECT_ID.firebaseapp.com",
+            projectId: "PROJECT_ID",
+            storageBucket: "PROJECT_ID.appspot.com",
+            messagingSenderId: "SENDER_ID",
+            appId: "APP_ID"
+        };
+
+        // Initialize Firebase (Try/Catch to prevent crash if config is missing)
+        let db;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+        } catch (e) {
+            console.warn("Firebase not initialized. Replace placeholder config.");
+        }
+
+        // --- State ---
+        let currentMode = 'starts';
+        // Generate a random user ID for this session if not present
+        const userId = localStorage.getItem('vanity_user_id') || 'user_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('vanity_user_id', userId);
+
+        // --- UI Logic ---
+        function setMode(mode) {
+            currentMode = mode;
+
+            // Update buttons
+            ['starts', 'ends', 'custom'].forEach(m => {
+                const btn = document.getElementById(`btn-${m}`);
+                if (m === mode) {
+                    btn.className = "flex-1 px-4 py-2 rounded-md transition-colors bg-purple-600 text-white";
+                } else {
+                    btn.className = "flex-1 px-4 py-2 rounded-md transition-colors hover:bg-gray-700 text-gray-300";
+                }
+            });
+
+            // Update inputs
+            const prefixGroup = document.getElementById('prefix-group');
+            const suffixGroup = document.getElementById('suffix-group');
+
+            if (mode === 'starts') {
+                prefixGroup.classList.remove('hidden');
+                suffixGroup.classList.add('hidden');
+                document.getElementById('suffix').value = '';
+            } else if (mode === 'ends') {
+                prefixGroup.classList.add('hidden');
+                suffixGroup.classList.remove('hidden');
+                document.getElementById('prefix').value = '';
+            } else {
+                prefixGroup.classList.remove('hidden');
+                suffixGroup.classList.remove('hidden');
+            }
+
+            handleInput();
+        }
+
+        function handleInput() {
+            const prefix = document.getElementById('prefix').value.trim();
+            const suffix = document.getElementById('suffix').value.trim();
+
+            // Base58 Validation (simplistic: remove non-alphanumeric + 0, O, I, l)
+            // Solana addresses use Base58. 0, O, I, l are excluded.
+            // 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+
+            const totalLen = prefix.length + suffix.length;
+            calculateDifficultyAndCost(totalLen);
+            calculateEstimatedTime(totalLen);
+        }
+
+        function calculateDifficultyAndCost(totalLen) {
+            let cost = 0;
+            if (totalLen > 0) {
+                // Formula: Cost = 10^(TotalLength - 1)
+                cost = Math.pow(10, totalLen - 1);
+            }
+            document.getElementById('cost-display').innerText = '$' + cost.toLocaleString();
+        }
+
+        function calculateEstimatedTime(totalLen) {
+            if (totalLen === 0) {
+                document.getElementById('time-display').innerText = "Instant";
+                return;
+            }
+
+            // Formula: Estimated Seconds = (0.5 * (58 ^ TotalLength)) / 5,000,000
+            // Assuming 5,000,000 keys/sec (fast 4-vCPU Cloud Run)
+            const keysPerSec = 5000000;
+            const combinations = Math.pow(58, totalLen);
+            // Probability factor usually ~0.5 for 50% chance, or 1/P for expected value (mean).
+            // User requested formula: 0.5 * (58^L) / 5M
+            const estimatedSeconds = (0.5 * combinations) / keysPerSec;
+
+            document.getElementById('time-display').innerText = formatTime(estimatedSeconds);
+        }
+
+        function formatTime(seconds) {
+            if (seconds < 1) return "< 1 second";
+            if (seconds < 60) return `~${Math.round(seconds)} seconds`;
+
+            const minutes = seconds / 60;
+            if (minutes < 60) return `~${Math.round(minutes)} minutes`;
+
+            const hours = minutes / 60;
+            if (hours < 24) return `~${Math.round(hours)} hours`;
+
+            const days = hours / 24;
+            if (days < 365) return `~${Math.round(days)} days`;
+
+            const years = days / 365;
+            return `~${Math.round(years)} years`;
+        }
+
+        async function startGeneration() {
+            const prefix = document.getElementById('prefix').value.trim();
+            const suffix = document.getElementById('suffix').value.trim();
+
+            if (!prefix && !suffix) {
+                alert("Please enter a prefix or suffix.");
+                return;
+            }
+
+            const totalLen = prefix.length + suffix.length;
+            const cost = Math.pow(10, totalLen - 1); // recalculate just in case
+
+            const payload = {
+                userId: userId,
+                prefix: prefix,
+                suffix: suffix,
+                cost: cost,
+                timestamp: new Date().toISOString()
+            };
+
+            // Placeholder API URL
+            const API_URL = "YOUR_CLOUD_RUN_API_URL/submit-job";
+
+            try {
+                // Note: This will fail until replaced with a real URL or mocked
+                console.log("Submitting job:", payload);
+
+                // Simulate success for UI demo if API_URL is placeholder
+                if (API_URL.includes("YOUR_CLOUD_RUN")) {
+                    console.log("Simulating API call...");
+                    // Manually adding to Firestore would happen on backend,
+                    // but here we might just wait for the poller or simulate it.
+                    alert("Job submitted! (Simulation - Check Console)");
+                } else {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error("Submission failed");
+                    alert("Job submitted successfully!");
+                }
+            } catch (error) {
+                console.error(error);
+                alert("Error submitting job: " + error.message);
+            }
+        }
+
+        // --- Polling Logic ---
+        function pollJobStatus() {
+            if (!db) return;
+
+            const fetchJobs = () => {
+                // Query vanity_jobs for current userId
+                // status: 'pending', 'processing', 'completed', 'failed'
+                db.collection('vanity_jobs')
+                    .where('userId', '==', userId)
+                    .orderBy('timestamp', 'desc')
+                    .limit(5)
+                    .get()
+                    .then((snapshot) => {
+                        const jobList = document.getElementById('job-list');
+                        if (snapshot.empty) {
+                            jobList.innerHTML = '<div class="text-gray-500 text-center py-4">No active jobs found</div>';
+                            return;
+                        }
+
+                        jobList.innerHTML = '';
+                        snapshot.forEach(doc => {
+                            const job = doc.data();
+                            const statusColor = getStatusColor(job.status);
+
+                            const item = document.createElement('div');
+                            item.className = "bg-gray-750 p-4 rounded-lg flex justify-between items-center border border-gray-700";
+                            item.innerHTML = `
+                                <div>
+                                    <div class="font-mono text-sm">
+                                        <span class="text-purple-400">${job.prefix || ''}</span>...<span class="text-purple-400">${job.suffix || ''}</span>
+                                    </div>
+                                    <div class="text-xs text-gray-500">${new Date(job.timestamp).toLocaleString()}</div>
+                                </div>
+                                <div class="flex items-center space-x-3">
+                                    <span class="px-2 py-1 rounded text-xs font-bold ${statusColor}">
+                                        ${job.status ? job.status.toUpperCase() : 'UNKNOWN'}
+                                    </span>
+                                    ${job.publicKey ? `
+                                        <button onclick="navigator.clipboard.writeText('${job.publicKey}')" class="text-gray-400 hover:text-white text-xs">
+                                            Copy Key
+                                        </button>
+                                    ` : ''}
+                                </div>
+                            `;
+                            jobList.appendChild(item);
+                        });
+                    })
+                    .catch((error) => {
+                        console.error("Error polling jobs:", error);
+                    });
+            };
+
+            // Initial fetch
+            fetchJobs();
+
+            // Poll every 5 seconds
+            setInterval(fetchJobs, 5000);
+        }
+
+        function getStatusColor(status) {
+            switch (status) {
+                case 'completed': return 'bg-green-900 text-green-300';
+                case 'processing': return 'bg-blue-900 text-blue-300';
+                case 'failed': return 'bg-red-900 text-red-300';
+                default: return 'bg-gray-600 text-gray-300'; // pending
+            }
+        }
+
+        // Start polling on load
+        window.addEventListener('load', () => {
+             // In a real app, we'd start polling.
+             // With placeholder config, this might error in console, which is expected.
+             pollJobStatus();
+        });
+
+    </script>
+</body>
+</html>
