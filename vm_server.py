@@ -30,9 +30,13 @@ def index():
     return app.send_static_file('index.html')
 
 # Global to track active jobs
-# Limiting to 1 concurrent job for safety given "Cost optimization".
-MAX_CONCURRENT_JOBS = 1
-active_jobs_semaphore = multiprocessing.Semaphore(MAX_CONCURRENT_JOBS)
+MAX_CONCURRENT_JOBS = 6
+# Reserve 2 core slots for "Quick Jobs" (estimated time < 15 minutes).
+# Logic:
+# Long jobs can only acquire from sem_general (size 4).
+# Quick jobs try sem_general first, if full, they use sem_reserved (size 2).
+sem_general = multiprocessing.Semaphore(4)
+sem_reserved = multiprocessing.Semaphore(2)
 
 def is_base58(s):
     """Checks if the string contains only Base58 characters."""
@@ -101,11 +105,27 @@ def generate_key_from_pin(pin, user_id):
     )
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
-def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin):
+def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick):
     """
     Background process that manages the Pool of workers.
     """
+    acquired_general = False
+    acquired_reserved = False
     try:
+        # Concurrency Logic: Wait for a slot
+        if is_quick:
+            # Try general slot first (non-blocking)
+            if sem_general.acquire(block=False):
+                acquired_general = True
+            else:
+                # If general full, block on reserved slot
+                sem_reserved.acquire() # Blocking
+                acquired_reserved = True
+        else:
+            # Long jobs must wait for general slot
+            sem_general.acquire() # Blocking
+            acquired_general = True
+
         # Initialize Firestore inside the process
         db = firestore.Client(project=PROJECT_ID)
 
@@ -166,7 +186,10 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin):
             pass
     finally:
         # Release semaphore
-        active_jobs_semaphore.release()
+        if acquired_general:
+            sem_general.release()
+        if acquired_reserved:
+            sem_reserved.release()
 
 @app.route('/check-user', methods=['POST'])
 def check_user():
@@ -247,12 +270,19 @@ def submit_job():
         if not bcrypt.checkpw(pin.encode(), stored_hash.encode()):
              return jsonify({'error': 'Invalid PIN.'}), 401
 
+        # Check User Limit: Return 403 if user has QUEUED or RUNNING job
+        active_jobs = db.collection('vanity_jobs').where('user_id', '==', user_id).where('status', 'in', ['QUEUED', 'RUNNING']).get()
+        if len(list(active_jobs)) > 0:
+             return jsonify({'error': 'You can only run one job at a time.'}), 403
+
     except Exception as e:
          return jsonify({'error': str(e)}), 500
 
-    # Check concurrency
-    if not active_jobs_semaphore.acquire(block=False):
-         return jsonify({'error': 'Server busy. Please try again later.'}), 503
+    # Calculate difficulty to determine priority
+    total_len = len(prefix or '') + len(suffix or '')
+    # Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
+    est_seconds = (0.5 * (58 ** total_len)) / 5000000
+    is_quick = est_seconds < 900 # 15 minutes
 
     job_id = str(uuid.uuid4())
 
@@ -269,11 +299,11 @@ def submit_job():
             'created_at': firestore.SERVER_TIMESTAMP
         })
     except Exception as e:
-        active_jobs_semaphore.release()
         return jsonify({'error': str(e)}), 500
 
     # Spawn Background Process
-    p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, case_sensitive, pin))
+    # We spawn it immediately. It will block inside background_grinder if semaphores are full.
+    p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick))
     p.start()
 
     return jsonify({'job_id': job_id, 'message': 'Job accepted'}), 202
