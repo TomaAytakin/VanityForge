@@ -32,7 +32,7 @@
 
     <!-- Banner -->
     <div class="w-full max-w-2xl mb-8 flex justify-center">
-        <img src="banner.png" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
+        <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
     </div>
 
     <!-- Auth Section -->
@@ -78,6 +78,8 @@
                     <input type="text" id="suffix" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. 888">
                 </div>
             </div>
+
+            <p class="text-xs text-gray-500 mb-4">Note: Characters 0, O, I, and l are not allowed by Solana for security reasons.</p>
 
             <div class="flex items-center gap-2 mb-4">
                 <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
@@ -438,6 +440,7 @@
         function startSubmissionFlow() {
              const prefix = document.getElementById('prefix').value;
              const suffix = document.getElementById('suffix').value;
+             const totalLen = prefix.length + suffix.length;
 
              if (!prefix && !suffix) {
                 const errorEl = document.getElementById('submit-error');
@@ -446,6 +449,20 @@
                 return;
              }
              document.getElementById('submit-error').classList.add('hidden');
+
+             // Check estimated time
+             // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
+             let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
+             if (seconds > 3600) {
+                 let timeStr;
+                 if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + " hours";
+                 else timeStr = (seconds/86400).toFixed(1) + " days";
+
+                 if (!confirm(`This job may take ${timeStr}. Do you accept the wait and proceed?`)) {
+                     return;
+                 }
+             }
+
              openNumpad('submit', 'Enter PIN to Forge', submitJob);
         }
 
