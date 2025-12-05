@@ -29,6 +29,14 @@ CORS(app, resources={r"/*": {"origins": "https://tomaaytakin.github.io"}})
 def index():
     return app.send_static_file('index.html')
 
+@app.route('/roadmap')
+def roadmap():
+    return app.send_static_file('roadmap.html')
+
+@app.route('/faq')
+def faq():
+    return app.send_static_file('faq.html')
+
 # Global to track active jobs
 MAX_CONCURRENT_JOBS = 6
 # Reserve 2 core slots for "Quick Jobs" (estimated time < 15 minutes).

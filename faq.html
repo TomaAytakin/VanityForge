@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VanityForge - FAQ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 80px; }
+        .glass-panel { background: rgba(40, 40, 40, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        details > summary { list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center px-4">
+
+    <!-- Navigation Bar -->
+    <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <span class="text-purple-500 font-bold text-xl tracking-wider uppercase"><i class="fa-solid fa-fire-flame-curved"></i> VanityForge</span>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="ml-10 flex items-baseline space-x-4">
+                            <a href="/" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
+                            <a href="/roadmap" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
+                            <a href="/faq" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
+                            <a href="https://github.com/tomaaytakin" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="-mr-2 flex md:hidden">
+                    <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white">
+                        <span class="sr-only">Open main menu</span>
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile menu, show/hide based on menu state. -->
+        <div class="hidden md:hidden" id="mobile-menu">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                <a href="/" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Forge</a>
+                <a href="/roadmap" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
+                <a href="/faq" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
+                <a href="https://github.com/tomaaytakin" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="w-full max-w-3xl mt-10 mb-20">
+        <h1 class="text-4xl font-bold text-center mb-10 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">Frequently Asked Questions</h1>
+
+        <div class="space-y-4">
+            <!-- Questions generated via script -->
+        </div>
+    </div>
+    <script>
+         const faqs = [
+            {q: "What is VanityForge?", a: "A high-performance cloud tool to generate custom Solana wallet addresses starting with specific characters."},
+            {q: "Is it safe?", a: "Yes. We use Client-Side Encryption. We never see your raw private key; it is encrypted with your PIN before it hits our database."},
+            {q: "Do you store my Private Key?", a: "We store an encrypted blob that is mathematically impossible to read without your PIN."},
+            {q: "What is the PIN for?", a: "It is your personal decryption key. It unlocks your vault."},
+            {q: "What if I lose my PIN?", a: "Your wallet is lost forever. We cannot recover it. This is a security feature, not a bug."},
+            {q: "Can I close the browser tab?", a: "Yes! Our servers run 24/7. You can come back days later to check your job."},
+            {q: "Why can't I use '0', 'O', 'I', or 'l'?", a: "Solana uses Base58 encoding, which excludes these characters to prevent visual confusion."},
+            {q: "How long does it take?", a: "4 characters is instant. 5 characters takes minutes. 6 characters takes hours."},
+            {q: "Why is my job stuck on \"RUNNING\"?", a: "It's not stuck, it's grinding! Harder prefixes take exponentially longer."},
+            {q: "Can I generate two wallets at once?", a: "Currently, we limit users to one active job to ensure fairness."},
+            {q: "Is it free?", a: "Currently yes, during our Beta phase."},
+            {q: "How do I pay in the future?", a: "We will integrate PUMP-APP tokens for premium speed tiers."},
+            {q: "What is \"Dev Mode\"?", a: "A testing sandbox for our developers."},
+            {q: "Can I use Phantom Wallet?", a: "Yes, it is the recommended way to sign in."},
+            {q: "Can I use Google Login?", a: "Yes, for users who don't have a wallet extension installed yet."},
+            {q: "Is the code open source?", a: "Parts of our client are verifiable, but our grinding engine is proprietary."},
+            {q: "Do you support Ethereum?", a: "Not yet. We are Solana-first."},
+            {q: "Does it run on my computer?", a: "No, it runs on our dedicated cloud hardware, saving your battery."},
+            {q: "Who are the developers?", a: "We are a team of privacy-focused crypto engineers."},
+            {q: "How do I contact support?", a: "Reach out via our official X (Twitter) handle."}
+         ];
+
+         const container = document.querySelector('.space-y-4');
+         faqs.forEach(item => {
+             const details = document.createElement('details');
+             details.className = "glass-panel rounded-lg group open:ring-1 open:ring-purple-500/50";
+             details.innerHTML = `
+                <summary class="flex cursor-pointer items-center justify-between p-6 font-medium text-slate-200">
+                    <span>${item.q}</span>
+                    <span class="transition group-open:rotate-180 text-purple-400">
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </span>
+                </summary>
+                <div class="px-6 pb-6 text-slate-400 border-t border-gray-700/50 pt-4">
+                    ${item.a}
+                </div>
+             `;
+             container.appendChild(details);
+         });
+    </script>
+</body>
+</html>
