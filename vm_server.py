@@ -129,6 +129,7 @@ def background_grinder(job_id, prefix, suffix, case_sensitive):
                 'secret_key': secret_key,
                 'completed_at': firestore.SERVER_TIMESTAMP
             })
+            print(f"SECRET KEY SAVED for {job_id}")
 
     except Exception as e:
         print(f"Error in background grinder: {e}")
