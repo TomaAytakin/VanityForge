@@ -298,17 +298,22 @@
 
                     snapshot.forEach(doc => {
                         const job = doc.data();
-                        const statusColor = job.status === 'completed' ? 'text-green-400' :
-                                            job.status === 'processing' ? 'text-yellow-400' :
-                                            job.status === 'failed' ? 'text-red-400' : 'text-gray-400';
 
-                        const statusIcon = job.status === 'completed' ? '<i class="fa-solid fa-check-circle"></i>' :
-                                           job.status === 'processing' ? '<i class="fa-solid fa-cog fa-spin"></i>' :
-                                           job.status === 'failed' ? '<i class="fa-solid fa-times-circle"></i>' : '<i class="fa-regular fa-clock"></i>';
+                        // Fix Data Mapping
+                        const secretKey = job.secret_key || job.secretKey || "";
+                        const status = (job.status || "").toUpperCase();
 
+                        let statusColor = 'text-gray-400';
+                        let statusIcon = '';
                         let resultHtml = '';
-                        if (job.status === 'completed' && job.public_key && job.secret_key) {
-                             resultHtml = `
+
+                        // Fix UI Logic
+                        if (status === 'COMPLETED' && secretKey) {
+                            statusColor = 'text-green-400';
+                            statusIcon = '<i class="fa-solid fa-check-circle"></i>';
+
+                            // Show Eye Icon and Copy Button
+                            resultHtml = `
                                 <div class="mt-3 bg-gray-900/50 p-3 rounded border border-gray-700/50">
                                     <div class="flex justify-between items-center mb-1">
                                         <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Public Key</span>
@@ -318,22 +323,28 @@
 
                                     <div class="flex justify-between items-center mb-1">
                                         <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
-                                        <button onclick="toggleReveal('${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold">Reveal</button>
+                                        <button onclick="toggleReveal('${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
                                     </div>
                                     <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
                                         <div class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
-                                            ${job.secret_key || 'N/A'}
+                                            ${secretKey}
                                         </div>
-                                        <button onclick="copyToClipboard('${job.secret_key}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
+                                        <button onclick="copyToClipboard('${secretKey}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
                                     </div>
                                 </div>
                              `;
-                        } else if (job.status === 'failed') {
+                        } else if (status === 'FAILED') {
+                            statusColor = 'text-red-400';
+                            statusIcon = '<i class="fa-solid fa-times-circle"></i>';
                             resultHtml = `
                                 <div class="mt-2 text-xs text-red-400 italic">
                                     ${job.error || "Job failed to process."}
                                 </div>
                             `;
+                        } else {
+                            // ELSE: Show the Spinner/Clock icon. Add the class animate-spin.
+                            statusColor = 'text-yellow-400';
+                            statusIcon = '<i class="fa-regular fa-clock animate-spin"></i>';
                         }
 
                         const el = document.createElement('div');
@@ -371,10 +382,10 @@
             const btn = document.getElementById(`btn-${id}`);
             if (el.classList.contains('hidden')) {
                 el.classList.remove('hidden');
-                btn.innerText = "Hide";
+                btn.innerHTML = '<i class="fa-regular fa-eye-slash"></i>';
             } else {
                 el.classList.add('hidden');
-                btn.innerText = "Reveal";
+                btn.innerHTML = '<i class="fa-regular fa-eye"></i>';
             }
         }
 
