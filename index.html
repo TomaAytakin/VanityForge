@@ -8,7 +8,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -18,13 +17,22 @@
         ::-webkit-scrollbar-track { background: #1a1a1a; }
         ::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+        .numpad-btn {
+            @apply bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl;
+        }
+        .pin-dot {
+            width: 12px; height: 12px; border-radius: 50%; background-color: #4b5563; transition: all 0.2s;
+        }
+        .pin-dot.active {
+            background-color: #9333ea; box-shadow: 0 0 8px #9333ea;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center py-10 px-4">
 
     <!-- Banner -->
     <div class="w-full max-w-2xl mb-8 flex justify-center">
-        <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
+        <img src="banner.png" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
     </div>
 
     <!-- Auth Section -->
@@ -83,16 +91,9 @@
                     .toggle-checkbox { right: 0; border-color: #4b5563; transition: all 0.3s; top: 0; left: 0;}
                     .toggle-checkbox:checked { left: 50%; }
                     .toggle-label { width: 100%; }
-                    /* Custom toggle styling fix */
                     .toggle-checkbox { position: absolute; top:0; left: 0; right: auto; bottom: auto; }
                     .toggle-checkbox:checked { left: 1.25rem; border-color: #a855f7; }
                 </style>
-            </div>
-
-            <div class="mb-6">
-                <label class="block text-sm text-gray-400 mb-1">Set Encryption Password <span class="text-xs text-red-500">*Mandatory</span></label>
-                <input type="password" id="encryption-password" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white placeholder-gray-600" placeholder="Password to encrypt your key">
-                <p class="text-xs text-gray-500 mt-1">We never store your raw keys. Only you can decrypt them with this password.</p>
             </div>
 
             <div class="bg-gray-800/50 rounded-lg p-4 mb-6 text-sm border border-gray-700">
@@ -110,8 +111,8 @@
                 </div>
             </div>
 
-            <button onclick="submitJob()" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 rounded-lg shadow-lg transition transform hover:scale-[1.01] active:scale-[0.99] flex justify-center items-center gap-2">
-                <i class="fa-solid fa-rocket"></i> Start Mining
+            <button onclick="startSubmissionFlow()" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 rounded-lg shadow-lg transition transform hover:scale-[1.01] active:scale-[0.99] flex justify-center items-center gap-2">
+                <i class="fa-solid fa-rocket"></i> Forge
             </button>
             <p id="submit-error" class="text-red-400 text-sm mt-3 text-center hidden bg-red-900/20 py-2 rounded border border-red-900/50"></p>
         </div>
@@ -126,12 +127,38 @@
                 <p class="text-center text-gray-500 italic py-8">No active jobs found.</p>
             </div>
         </div>
+    </div>
 
+    <!-- Numpad Modal -->
+    <div id="numpad-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm hidden transition-opacity duration-300">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform scale-95 transition-transform duration-300" id="numpad-content">
+            <h3 id="numpad-title" class="text-center text-xl font-bold text-white mb-6">Enter Vault PIN</h3>
+
+            <div class="flex justify-center gap-4 mb-8" id="pin-display">
+                <!-- Dots will be injected here -->
+            </div>
+
+            <div class="grid grid-cols-3 gap-4">
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(1)">1</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(2)">2</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(3)">3</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(4)">4</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(5)">5</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(6)">6</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(7)">7</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(8)">8</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(9)">9</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-red-400 font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadClear()"><i class="fa-solid fa-delete-left"></i></button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(0)">0</button>
+                <button class="numpad-btn bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadSubmit()"><i class="fa-solid fa-check"></i></button>
+            </div>
+            <button onclick="closeNumpad()" class="mt-6 w-full text-gray-500 hover:text-white text-sm">Cancel</button>
+        </div>
     </div>
 
     <script>
         // CONFIGURATION (HARDCODED)
-        const API_URL = "/submit-job";
+        const API_URL = ""; // Relative path
         const FIREBASE_CONFIG = {
             apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
             authDomain: "vanityforge.firebaseapp.com",
@@ -152,6 +179,119 @@
         let currentUser = null;
         let jobListenerUnsubscribe = null;
 
+        // AUDIO SYSTEM
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'input') {
+                // High pitch blip
+                oscillator.type = 'sine'; // or triangle
+                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+                oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'delete') {
+                // Low pitch whoosh/buzz
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+                oscillator.frequency.linearRampToValueAtTime(50, audioCtx.currentTime + 0.2);
+
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.2);
+            }
+        }
+
+        // NUMPAD LOGIC
+        let currentPin = "";
+        let numpadMode = ""; // 'create', 'submit', 'reveal'
+        let numpadCallback = null;
+        let revealJobId = null;
+
+        function openNumpad(mode, title, callback, jobId = null) {
+            currentPin = "";
+            numpadMode = mode;
+            numpadCallback = callback;
+            revealJobId = jobId;
+
+            document.getElementById('numpad-title').innerText = title;
+            updatePinDisplay();
+
+            const modal = document.getElementById('numpad-modal');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('numpad-content').classList.replace('scale-95', 'scale-100');
+            }, 10);
+        }
+
+        function closeNumpad() {
+            const modal = document.getElementById('numpad-modal');
+            document.getElementById('numpad-content').classList.replace('scale-100', 'scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+            currentPin = "";
+        }
+
+        function numpadInput(num) {
+            if (currentPin.length < 6) {
+                currentPin += num;
+                playSound('input');
+                updatePinDisplay();
+            }
+        }
+
+        function numpadClear() {
+            if (currentPin.length > 0) {
+                currentPin = currentPin.slice(0, -1);
+                playSound('delete');
+                updatePinDisplay();
+            }
+        }
+
+        function updatePinDisplay() {
+            const container = document.getElementById('pin-display');
+            container.innerHTML = '';
+            // Always show 6 slots
+            for (let i = 0; i < 6; i++) {
+                const dot = document.createElement('div');
+                dot.className = `pin-dot ${i < currentPin.length ? 'active' : ''}`;
+                container.appendChild(dot);
+            }
+        }
+
+        async function numpadSubmit() {
+            if (currentPin.length < 4) {
+                alert("PIN must be at least 4 digits.");
+                return;
+            }
+            playSound('input'); // Confirm sound?
+
+            if (numpadMode === 'create') {
+                await setPin(currentPin);
+            } else if (numpadMode === 'submit') {
+                numpadCallback(currentPin);
+            } else if (numpadMode === 'reveal') {
+                numpadCallback(revealJobId, currentPin);
+            }
+
+            closeNumpad();
+        }
+
         // AUTHENTICATION
         async function loginWithGoogle() {
             const provider = new firebase.auth.GoogleAuthProvider();
@@ -159,12 +299,7 @@
                 const result = await firebase.auth().signInWithPopup(provider);
                 const user = result.user;
                 currentUser = user.uid;
-
-                if (user.email === 'tomaaytakin@gmail.com') {
-                    // Unlock Dev Mode features if needed, for now just marking success
-                    console.log("Dev Admin Logged In");
-                }
-                onLoginSuccess(user.email === 'tomaaytakin@gmail.com');
+                await checkUserStatus(currentUser);
             } catch (error) {
                 console.error(error);
                 alert("Google Login Failed: " + error.message);
@@ -176,7 +311,7 @@
                 try {
                     const resp = await window.solana.connect();
                     currentUser = resp.publicKey.toString();
-                    onLoginSuccess();
+                    await checkUserStatus(currentUser);
                 } catch (err) {
                     console.error(err);
                     alert("Connection failed.");
@@ -190,10 +325,51 @@
             const pw = document.getElementById('dev-password').value;
             if (pw === "123580-Toma") {
                 currentUser = "DEV_USER";
-                onLoginSuccess(true);
+                checkUserStatus(currentUser);
             } else {
                 alert("Access Denied");
                 document.getElementById('dev-password').value = '';
+            }
+        }
+
+        async function checkUserStatus(userId) {
+            try {
+                const res = await fetch('/check-user', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: userId })
+                });
+                const data = await res.json();
+
+                if (data.has_pin) {
+                    onLoginSuccess();
+                } else {
+                    // Prompt to create PIN
+                    document.getElementById('auth-section').classList.add('hidden'); // Hide auth temporarily
+                    openNumpad('create', 'Create your Vault PIN', null);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Error checking user status.");
+            }
+        }
+
+        async function setPin(pin) {
+            try {
+                const res = await fetch('/set-pin', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: currentUser, pin: pin })
+                });
+                if (res.ok) {
+                    onLoginSuccess();
+                } else {
+                    alert("Failed to set PIN.");
+                    location.reload();
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Error setting PIN.");
             }
         }
 
@@ -210,7 +386,7 @@
             }, 50);
 
             let displayId = currentUser;
-            if (isDev) displayId = "Dev Mode";
+            if (currentUser === "DEV_USER") displayId = "Dev Mode";
             else if (currentUser.length > 10) displayId = currentUser.slice(0, 4) + '...' + currentUser.slice(-4);
 
             document.getElementById('user-id-display').innerText = displayId;
@@ -251,7 +427,6 @@
 
         ['prefix', 'suffix'].forEach(id => {
             document.getElementById(id).addEventListener('input', (e) => {
-                // Validate base58 input (alphanumeric except 0, O, I, l)
                 const val = e.target.value;
                 const clean = val.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
                 if (val !== clean) e.target.value = clean;
@@ -260,27 +435,26 @@
         });
 
         // JOB SUBMISSION
-        async function submitJob() {
-            const prefix = document.getElementById('prefix').value;
-            const suffix = document.getElementById('suffix').value;
-            const encryptionPassword = document.getElementById('encryption-password').value;
-            const caseSensitive = document.getElementById('case-sensitive').checked;
-            const errorEl = document.getElementById('submit-error');
-            const submitBtn = document.querySelector('button[onclick="submitJob()"]');
+        function startSubmissionFlow() {
+             const prefix = document.getElementById('prefix').value;
+             const suffix = document.getElementById('suffix').value;
 
-            if (!prefix && !suffix) {
+             if (!prefix && !suffix) {
+                const errorEl = document.getElementById('submit-error');
                 errorEl.innerText = "Please specify a prefix or suffix.";
                 errorEl.classList.remove('hidden');
                 return;
-            }
+             }
+             document.getElementById('submit-error').classList.add('hidden');
+             openNumpad('submit', 'Enter PIN to Forge', submitJob);
+        }
 
-            if (!encryptionPassword) {
-                errorEl.innerText = "Encryption password is mandatory.";
-                errorEl.classList.remove('hidden');
-                return;
-            }
-
-            errorEl.classList.add('hidden');
+        async function submitJob(pin) {
+            const prefix = document.getElementById('prefix').value;
+            const suffix = document.getElementById('suffix').value;
+            const caseSensitive = document.getElementById('case-sensitive').checked;
+            const errorEl = document.getElementById('submit-error');
+            const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
 
             // Disable button
             submitBtn.disabled = true;
@@ -291,11 +465,11 @@
                 prefix: prefix,
                 suffix: suffix,
                 case_sensitive: caseSensitive,
-                encryption_key: encryptionPassword
+                pin: pin
             };
 
             try {
-                const res = await fetch(API_URL, {
+                const res = await fetch('/submit-job', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -305,19 +479,17 @@
                     // Success feedback
                     document.getElementById('prefix').value = '';
                     document.getElementById('suffix').value = '';
-                    document.getElementById('encryption-password').value = '';
                     updateEstimates();
-                    // Let the polling update the UI
                 } else {
                     const data = await res.json().catch(() => ({}));
-                    throw new Error(data.message || data.error || "Submission failed. Check API configuration.");
+                    throw new Error(data.message || data.error || "Submission failed.");
                 }
             } catch (e) {
                 errorEl.innerText = e.message;
                 errorEl.classList.remove('hidden');
             } finally {
                 submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Start Mining';
+                submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
             }
         }
 
@@ -336,22 +508,20 @@
                         return;
                     }
 
-                    // Use a fragment to avoid partial reflows
                     const fragment = document.createDocumentFragment();
 
                     snapshot.forEach(doc => {
                         const job = doc.data();
-
-                        // Fix Data Mapping
-                        const secretKey = job.secret_key || job.secretKey || "";
                         const status = (job.status || "").toUpperCase();
+
+                        // Check if key is available
+                        const secretKey = job.secret_key; // Encrypted
 
                         let statusColor = 'text-gray-400';
                         let statusIcon = '';
                         let resultHtml = '';
 
-                        // Fix UI Logic
-                        if (status === 'COMPLETED' && secretKey) {
+                        if (status === 'COMPLETED') {
                             statusColor = 'text-green-400';
                             statusIcon = '<i class="fa-solid fa-check-circle"></i>';
 
@@ -366,7 +536,7 @@
 
                                     <div class="flex justify-between items-center mb-1">
                                         <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
-                                        <button onclick="initiateReveal('${doc.id}', '${secretKey}', '${job.salt}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
+                                        <button onclick="openNumpad('reveal', 'Enter PIN to Unlock', revealKey, '${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
                                     </div>
                                     <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
                                         <div id="key-text-${doc.id}" class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
@@ -385,7 +555,6 @@
                                 </div>
                             `;
                         } else {
-                            // ELSE: Show the Spinner/Clock icon. Add the class animate-spin.
                             statusColor = 'text-yellow-400';
                             statusIcon = '<i class="fa-regular fa-clock animate-spin"></i>';
                         }
@@ -419,82 +588,38 @@
                 });
         }
 
-        // UTILS
-        function initiateReveal(id, encryptedKey, salt) {
-            const el = document.getElementById(`secret-${id}`);
-            const btn = document.getElementById(`btn-${id}`);
-            const keyText = document.getElementById(`key-text-${id}`);
-
-            if (!el.classList.contains('hidden')) {
-                // Hide
-                el.classList.add('hidden');
-                btn.innerHTML = '<i class="fa-regular fa-eye"></i>';
-                keyText.innerText = ''; // Clear secret from DOM
-                return;
-            }
-
-            const password = prompt("Enter your encryption password to decrypt this key:");
-            if (!password) return;
-
+        async function revealKey(jobId, pin) {
             try {
-                const decrypted = decryptSecretKey(encryptedKey, password, salt);
-                if (decrypted) {
-                    keyText.innerText = decrypted;
+                const res = await fetch('/reveal-key', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ job_id: jobId, pin: pin })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    const el = document.getElementById(`secret-${jobId}`);
+                    const btn = document.getElementById(`btn-${jobId}`);
+                    const keyText = document.getElementById(`key-text-${jobId}`);
+
+                    keyText.innerText = data.secret_key;
                     el.classList.remove('hidden');
                     btn.innerHTML = '<i class="fa-regular fa-eye-slash"></i>';
+                    btn.onclick = () => {
+                         el.classList.add('hidden');
+                         btn.innerHTML = '<i class="fa-regular fa-eye"></i>';
+                         keyText.innerText = '';
+                         // Reset onclick
+                         btn.onclick = () => openNumpad('reveal', 'Enter PIN to Unlock', revealKey, jobId);
+                    };
                 } else {
-                    alert("Decryption failed. Wrong password?");
+                    alert(data.error || "Failed to reveal key.");
                 }
             } catch (e) {
                 console.error(e);
-                alert("Decryption error: " + e.message);
+                alert("Error revealing key.");
             }
-        }
-
-        function decryptSecretKey(token, password, salt) {
-            // Replicate Fernet logic
-            // 1. Derive Key
-            // Python: PBKDF2HMAC(sha256, 32, salt, 100000)
-            const key = CryptoJS.PBKDF2(password, CryptoJS.enc.Base64.parse(salt), {
-                keySize: 256/32,
-                iterations: 100000,
-                hasher: CryptoJS.algo.SHA256
-            });
-
-            // 2. Parse Fernet Token (Base64Url)
-            // Replace - with + and _ with /
-            const base64 = token.replace(/-/g, '+').replace(/_/g, '/');
-            const tokenBytes = CryptoJS.enc.Base64.parse(base64);
-
-            // Fernet Spec:
-            // Version (1B) | Timestamp (8B) | IV (16B) | Ciphertext (Var) | HMAC (32B)
-
-            // Extract IV (starts at offset 9, length 16)
-            // CryptoJS words are 4 bytes. 9 bytes = 2.25 words. This is tricky with words.
-            // Better to clone and hex manipulation or use bytes logic if possible.
-            // Let's use Hex for easier slicing.
-            const hex = CryptoJS.enc.Hex.stringify(tokenBytes);
-
-            // Version: 0-2 chars (1 byte)
-            // Timestamp: 2-18 chars (8 bytes)
-            // IV: 18-50 chars (16 bytes = 32 hex chars)
-            // Ciphertext: 50 to (End - 64) chars
-            // HMAC: (End - 64) to End chars (32 bytes = 64 hex chars)
-
-            const ivHex = hex.substring(18, 50);
-            const cipherTextHex = hex.substring(50, hex.length - 64);
-
-            const iv = CryptoJS.enc.Hex.parse(ivHex);
-            const ciphertext = CryptoJS.enc.Hex.parse(cipherTextHex);
-
-            // 3. Decrypt
-            const decrypted = CryptoJS.AES.decrypt(
-                { ciphertext: ciphertext },
-                key,
-                { iv: iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
-            );
-
-            return decrypted.toString(CryptoJS.enc.Utf8);
         }
 
         function copyKey(id) {
@@ -523,10 +648,15 @@
         window.loginWithGoogle = loginWithGoogle;
         window.connectWallet = connectWallet;
         window.handleDevLogin = handleDevLogin;
+        window.startSubmissionFlow = startSubmissionFlow;
         window.submitJob = submitJob;
-        window.initiateReveal = initiateReveal;
+        window.revealKey = revealKey;
         window.copyToClipboard = copyToClipboard;
         window.copyKey = copyKey;
+        window.numpadInput = numpadInput;
+        window.numpadClear = numpadClear;
+        window.numpadSubmit = numpadSubmit;
+        window.closeNumpad = closeNumpad;
     </script>
 </body>
 </html>
