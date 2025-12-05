@@ -307,7 +307,7 @@
                                            job.status === 'failed' ? '<i class="fa-solid fa-times-circle"></i>' : '<i class="fa-regular fa-clock"></i>';
 
                         let resultHtml = '';
-                        if (job.status === 'completed' && job.public_key) {
+                        if (job.status === 'completed' && job.public_key && job.secret_key) {
                              resultHtml = `
                                 <div class="mt-3 bg-gray-900/50 p-3 rounded border border-gray-700/50">
                                     <div class="flex justify-between items-center mb-1">
