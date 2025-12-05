@@ -6,10 +6,14 @@ import base58
 import re
 import time
 import signal
+import base64
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.cloud import firestore
 from solders.keypair import Keypair
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configuration
 PROJECT_ID = 'vanityforge'
@@ -85,7 +89,19 @@ def worker_wrapper(args):
         if result:
             return result
 
-def background_grinder(job_id, prefix, suffix, case_sensitive):
+def generate_key(password, salt):
+    """
+    Generates a Fernet key from the user's encryption_key (using a salt).
+    """
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    return base64.urlsafe_b64encode(kdf.derive(password.encode()))
+
+def background_grinder(job_id, prefix, suffix, case_sensitive, encryption_key):
     """
     Background process that manages the Pool of workers.
     """
@@ -120,13 +136,21 @@ def background_grinder(job_id, prefix, suffix, case_sensitive):
             pool.terminate()
             pool.join()
 
-            public_key, secret_key = found_key
+            public_key, raw_secret_key = found_key
+
+            # Encrypt the private key
+            salt = os.urandom(16)
+            key = generate_key(encryption_key, salt)
+            f = Fernet(key)
+            encrypted_secret_key = f.encrypt(raw_secret_key.encode()).decode()
+            salt_b64 = base64.b64encode(salt).decode()
 
             # Save to Firestore
             db.collection('vanity_jobs').document(job_id).update({
                 'status': 'COMPLETED',
                 'public_key': public_key,
-                'secret_key': secret_key,
+                'secret_key': encrypted_secret_key,
+                'salt': salt_b64,
                 'completed_at': firestore.SERVER_TIMESTAMP
             })
             print(f"SECRET KEY SAVED for {job_id}")
@@ -154,12 +178,15 @@ def submit_job():
     prefix = data.get('prefix')
     suffix = data.get('suffix', '')
     case_sensitive = data.get('case_sensitive', True)
+    encryption_key = data.get('encryption_key')
 
     # Input Validation
     if not user_id:
         return jsonify({'error': 'Missing user_id'}), 400
     if not prefix and not suffix:
         return jsonify({'error': 'Prefix or suffix required'}), 400
+    if not encryption_key:
+        return jsonify({'error': 'Encryption password is mandatory'}), 400
 
     if (prefix and not is_base58(prefix)) or (suffix and not is_base58(suffix)):
         return jsonify({'error': 'Invalid characters. Base58 characters only.'}), 400
@@ -187,7 +214,7 @@ def submit_job():
         return jsonify({'error': str(e)}), 500
 
     # Spawn Background Process
-    p = multiprocessing.Process(target=background_grinder, args=(job_id, prefix, suffix, case_sensitive))
+    p = multiprocessing.Process(target=background_grinder, args=(job_id, prefix, suffix, case_sensitive, encryption_key))
     p.start()
 
     return jsonify({'job_id': job_id, 'message': 'Job accepted'}), 202

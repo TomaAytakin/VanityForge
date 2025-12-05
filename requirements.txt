@@ -3,3 +3,4 @@ flask-cors
 google-cloud-firestore
 solders
 base58
+cryptography
