@@ -45,14 +45,12 @@ def is_base58(s):
     pattern = r'^[1-9A-HJ-NP-Za-km-z]+$'
     return bool(re.match(pattern, s))
 
-def check_key(prefix, suffix, case_sensitive):
+def check_key_batch(prefix, suffix, case_sensitive, batch_size):
     """
-    Worker function to run in a Pool.
-    Tries a batch of keys.
+    Checks a batch of keys.
+    Returns (public_key, secret_key, attempts_made)
     """
-    # Check a batch of keys to reduce overhead of inter-process communication
-    BATCH_SIZE = 500
-    for _ in range(BATCH_SIZE):
+    for i in range(batch_size):
         kp = Keypair()
         pub = str(kp.pubkey())
 
@@ -73,20 +71,16 @@ def check_key(prefix, suffix, case_sensitive):
 
         if s_match:
             # Found match
-            return (str(kp.pubkey()), base58.b58encode(bytes(kp)).decode('ascii'))
+            return (str(kp.pubkey()), base58.b58encode(bytes(kp)).decode('ascii'), i + 1)
 
-    return None
+    return (None, None, batch_size)
 
-def worker_wrapper(args):
+def worker_batch_wrapper(args):
     """
-    Wrapper to unpack arguments and run check_key loop.
+    Wrapper to unpack arguments and run check_key_batch.
     """
-    prefix, suffix, case_sensitive = args
-    # Loop indefinitely until found (or terminated by parent)
-    while True:
-        result = check_key(prefix, suffix, case_sensitive)
-        if result:
-            return result
+    prefix, suffix, case_sensitive, batch_size = args
+    return check_key_batch(prefix, suffix, case_sensitive, batch_size)
 
 def get_deterministic_salt(user_id):
     """Generates a deterministic salt based on the user_id."""
@@ -129,30 +123,72 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
         # Initialize Firestore inside the process
         db = firestore.Client(project=PROJECT_ID)
 
+        # Checkpointing Initialization
+        checkpoint_ref = db.collection('job_checkpoints').document(job_id)
+        doc = checkpoint_ref.get()
+        total_attempts = 0
+        if doc.exists:
+            total_attempts = doc.to_dict().get('last_attempt_number', 0)
+            # Resuming logic: We just continue counting from here.
+
+        last_checkpoint_save = total_attempts
+
         # Update status to RUNNING
         db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
         # Initialize Pool with exactly 4 processes
         pool_size = 4
-        with multiprocessing.Pool(processes=pool_size) as pool:
-            results = []
-            # Submit tasks to the pool
-            for _ in range(pool_size):
-                results.append(pool.apply_async(worker_wrapper, args=((prefix, suffix, case_sensitive),)))
+        BATCH_SIZE = 50000 # Process keys in chunks
 
-            # Monitor results
+        with multiprocessing.Pool(processes=pool_size) as pool:
+            pending_results = []
+
+            # Helper to add tasks
+            def add_task():
+                return pool.apply_async(worker_batch_wrapper, args=((prefix, suffix, case_sensitive, BATCH_SIZE),))
+
+            # Initial fill
+            for _ in range(pool_size * 2):
+                pending_results.append(add_task())
+
             found_key = None
+
             while not found_key:
-                for res in results:
+                next_pending = []
+                results_processed = 0
+
+                for res in pending_results:
                     if res.ready():
-                        found_key = res.get()
-                        if found_key:
-                            break
+                        results_processed += 1
+                        try:
+                            pub, raw_sec, count = res.get()
+                            total_attempts += count
+
+                            if pub:
+                                found_key = (pub, raw_sec)
+                                break
+                        except Exception as e:
+                            print(f"Worker error: {e}")
+                    else:
+                        next_pending.append(res)
+
                 if found_key:
                     break
-                time.sleep(0.1) # Prevent busy loop
 
-            # Found key, terminate pool
+                # Refill pool to keep it saturated
+                for _ in range(results_processed):
+                    next_pending.append(add_task())
+
+                pending_results = next_pending
+
+                # Progress Save: Every 10 million attempts
+                if total_attempts - last_checkpoint_save >= 10000000:
+                    checkpoint_ref.set({'last_attempt_number': total_attempts})
+                    last_checkpoint_save = total_attempts
+
+                time.sleep(0.05) # Prevent busy loop
+
+            # Cleanup
             pool.terminate()
             pool.join()
 
@@ -165,7 +201,6 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
             encrypted_secret_key = f.encrypt(raw_secret_key.encode()).decode()
 
             # Save to Firestore
-            # No need to save salt as it is deterministic
             db.collection('vanity_jobs').document(job_id).update({
                 'status': 'COMPLETED',
                 'public_key': public_key,
@@ -173,6 +208,9 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
                 'completed_at': firestore.SERVER_TIMESTAMP
             })
             print(f"SECRET KEY SAVED for {job_id}")
+
+            # Final Step: Delete checkpoint
+            checkpoint_ref.delete()
 
     except Exception as e:
         print(f"Error in background grinder: {e}")
@@ -252,11 +290,7 @@ def submit_job():
     if (prefix and not is_base58(prefix)) or (suffix and not is_base58(suffix)):
         return jsonify({'error': 'Invalid characters. Base58 characters only.'}), 400
 
-    # Verify PIN first (Optional but good for security, though strict verification requires checking hash)
-    # The requirement says "Accept pin... Use the pin to derive Fernet Key".
-    # It doesn't explicitly ask to verify the PIN against the hash here, but it's good practice.
-    # However, if the PIN is wrong here, the key will be encrypted with the wrong PIN, and the user won't be able to decrypt it later.
-    # So we SHOULD verify the PIN against the stored hash.
+    # Verify PIN first
     try:
         db = firestore.Client(project=PROJECT_ID)
         user_doc = db.collection('users').document(user_id).get()
@@ -302,7 +336,6 @@ def submit_job():
         return jsonify({'error': str(e)}), 500
 
     # Spawn Background Process
-    # We spawn it immediately. It will block inside background_grinder if semaphores are full.
     p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick))
     p.start()
 
@@ -345,13 +378,6 @@ def reveal_key():
             raw_secret_key = f.decrypt(encrypted_secret_key.encode()).decode()
             return jsonify({'secret_key': raw_secret_key})
         except Exception:
-            # If decryption fails (e.g. key rotation or logic error, though PIN check passed), handle it.
-            # Since we verify the PIN hash first, this is unlikely unless the salt/logic changed.
-            # But if the user somehow changed their PIN *after* starting the job but *before* revealing...
-            # Wait, if they change their PIN, the stored hash changes.
-            # But the job was encrypted with the OLD PIN.
-            # If the PIN changes, old jobs become inaccessible unless we re-encrypt them.
-            # The prompt doesn't ask for PIN change logic. I'll assume PIN stays same.
             return jsonify({'error': 'Decryption failed. Did you change your PIN?'}), 400
 
     except Exception as e:
