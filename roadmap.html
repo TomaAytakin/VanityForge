@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VanityForge - Roadmap</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 80px; }
+        .glass-panel { background: rgba(40, 40, 40, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center px-4">
+
+    <!-- Navigation Bar -->
+    <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <span class="text-purple-500 font-bold text-xl tracking-wider uppercase"><i class="fa-solid fa-fire-flame-curved"></i> VanityForge</span>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="ml-10 flex items-baseline space-x-4">
+                            <a href="/" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
+                            <a href="/roadmap" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
+                            <a href="/faq" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
+                            <a href="https://github.com/tomaaytakin" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="-mr-2 flex md:hidden">
+                    <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white">
+                        <span class="sr-only">Open main menu</span>
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile menu, show/hide based on menu state. -->
+        <div class="hidden md:hidden" id="mobile-menu">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                <a href="/" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Forge</a>
+                <a href="/roadmap" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
+                <a href="/faq" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
+                <a href="https://github.com/tomaaytakin" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="w-full max-w-4xl mt-10 mb-20">
+        <h1 class="text-4xl font-bold text-center mb-10 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">Project Roadmap</h1>
+
+        <div class="space-y-8 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-300 before:to-transparent">
+
+            <!-- Phase 1 -->
+            <div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                <div class="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-slate-300 group-[.is-active]:bg-purple-500 text-slate-500 group-[.is-active]:text-slate-100 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+                    <i class="fa-solid fa-check"></i>
+                </div>
+                <div class="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] glass-panel p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 border-l-4 border-l-purple-500">
+                    <div class="flex items-center justify-between space-x-2 mb-1">
+                        <div class="font-bold text-slate-200">Phase 1: Foundation (Current)</div>
+                    </div>
+                    <div class="text-slate-400">
+                        <ul class="list-disc pl-5 space-y-2">
+                            <li>4-Core VM Stability</li>
+                            <li>Web3 Auth (Phantom)</li>
+                            <li>Client-Side Encryption (Zero-Knowledge)</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Phase 2 -->
+            <div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group">
+                <div class="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-slate-300 text-slate-500 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                </div>
+                <div class="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] glass-panel p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 border-l-4 border-l-blue-500">
+                    <div class="flex items-center justify-between space-x-2 mb-1">
+                        <div class="font-bold text-slate-200">Phase 2: Acceleration (Coming Soon)</div>
+                    </div>
+                    <div class="text-slate-400">
+                         <ul class="list-disc pl-5 space-y-2">
+                            <li>8-Core Fast Track</li>
+                            <li>Email Notifications</li>
+                            <li>SMS Alerts</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Phase 3 -->
+            <div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group">
+                <div class="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-slate-300 text-slate-500 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+                    <i class="fa-solid fa-rocket"></i>
+                </div>
+                <div class="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] glass-panel p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 border-l-4 border-l-orange-500">
+                    <div class="flex items-center justify-between space-x-2 mb-1">
+                        <div class="font-bold text-slate-200">Phase 3: The Singularity (Future)</div>
+                    </div>
+                    <div class="text-slate-400">
+                         <ul class="list-disc pl-5 space-y-2">
+                            <li>GPU/CUDA Integration (100x Speed)</li>
+                            <li>PUMP-APP Token Payments</li>
+                            <li>Public Leaderboard</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</body>
+</html>
