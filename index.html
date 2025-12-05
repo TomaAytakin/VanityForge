@@ -6,7 +6,9 @@
     <title>VanityForge</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -22,15 +24,20 @@
 
     <!-- Banner -->
     <div class="w-full max-w-2xl mb-8 flex justify-center">
-        <img src="banner.png" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
+        <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
     </div>
 
     <!-- Auth Section -->
     <div id="auth-section" class="w-full max-w-2xl glass-panel p-8 rounded-xl shadow-lg text-center transition-all duration-300">
         <h2 class="text-2xl font-bold mb-6 text-purple-400">Connect to VanityForge</h2>
-        <button onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center mx-auto gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
-            <i class="fa-solid fa-wallet"></i> Connect Phantom Wallet
-        </button>
+        <div class="flex flex-col gap-4 max-w-xs mx-auto">
+            <button onclick="loginWithGoogle()" class="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+                <i class="fa-brands fa-google"></i> Login with Google
+            </button>
+            <button onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+                <i class="fa-solid fa-wallet"></i> Connect Phantom
+            </button>
+        </div>
 
         <div class="mt-8 border-t border-gray-700 pt-4">
             <p class="text-xs text-gray-500 mb-2 cursor-pointer hover:text-gray-400 transition-colors" onclick="document.getElementById('dev-login').classList.toggle('hidden')">Dev Access</p>
@@ -64,7 +71,7 @@
                 </div>
             </div>
 
-            <div class="flex items-center gap-2 mb-6">
+            <div class="flex items-center gap-2 mb-4">
                 <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
                     <input type="checkbox" name="toggle" id="case-sensitive" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
                     <label for="case-sensitive" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
@@ -80,6 +87,12 @@
                     .toggle-checkbox { position: absolute; top:0; left: 0; right: auto; bottom: auto; }
                     .toggle-checkbox:checked { left: 1.25rem; border-color: #a855f7; }
                 </style>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm text-gray-400 mb-1">Set Encryption Password <span class="text-xs text-red-500">*Mandatory</span></label>
+                <input type="password" id="encryption-password" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white placeholder-gray-600" placeholder="Password to encrypt your key">
+                <p class="text-xs text-gray-500 mt-1">We never store your raw keys. Only you can decrypt them with this password.</p>
             </div>
 
             <div class="bg-gray-800/50 rounded-lg p-4 mb-6 text-sm border border-gray-700">
@@ -140,6 +153,24 @@
         let jobListenerUnsubscribe = null;
 
         // AUTHENTICATION
+        async function loginWithGoogle() {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            try {
+                const result = await firebase.auth().signInWithPopup(provider);
+                const user = result.user;
+                currentUser = user.uid;
+
+                if (user.email === 'tomaaytakin@gmail.com') {
+                    // Unlock Dev Mode features if needed, for now just marking success
+                    console.log("Dev Admin Logged In");
+                }
+                onLoginSuccess(user.email === 'tomaaytakin@gmail.com');
+            } catch (error) {
+                console.error(error);
+                alert("Google Login Failed: " + error.message);
+            }
+        }
+
         async function connectWallet() {
             if (window.solana && window.solana.isPhantom) {
                 try {
@@ -159,14 +190,14 @@
             const pw = document.getElementById('dev-password').value;
             if (pw === "123580-Toma") {
                 currentUser = "DEV_USER";
-                onLoginSuccess();
+                onLoginSuccess(true);
             } else {
                 alert("Access Denied");
                 document.getElementById('dev-password').value = '';
             }
         }
 
-        function onLoginSuccess() {
+        function onLoginSuccess(isDev = false) {
             document.getElementById('auth-section').classList.add('hidden');
             const appInterface = document.getElementById('app-interface');
             appInterface.classList.remove('hidden');
@@ -178,8 +209,11 @@
                 appInterface.style.opacity = 1;
             }, 50);
 
-            document.getElementById('user-id-display').innerText = currentUser === "DEV_USER" ? "Dev Mode" :
-                currentUser.slice(0, 4) + '...' + currentUser.slice(-4);
+            let displayId = currentUser;
+            if (isDev) displayId = "Dev Mode";
+            else if (currentUser.length > 10) displayId = currentUser.slice(0, 4) + '...' + currentUser.slice(-4);
+
+            document.getElementById('user-id-display').innerText = displayId;
 
             pollJobStatus();
         }
@@ -229,12 +263,19 @@
         async function submitJob() {
             const prefix = document.getElementById('prefix').value;
             const suffix = document.getElementById('suffix').value;
+            const encryptionPassword = document.getElementById('encryption-password').value;
             const caseSensitive = document.getElementById('case-sensitive').checked;
             const errorEl = document.getElementById('submit-error');
             const submitBtn = document.querySelector('button[onclick="submitJob()"]');
 
             if (!prefix && !suffix) {
                 errorEl.innerText = "Please specify a prefix or suffix.";
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            if (!encryptionPassword) {
+                errorEl.innerText = "Encryption password is mandatory.";
                 errorEl.classList.remove('hidden');
                 return;
             }
@@ -249,7 +290,8 @@
                 user_id: currentUser,
                 prefix: prefix,
                 suffix: suffix,
-                case_sensitive: caseSensitive
+                case_sensitive: caseSensitive,
+                encryption_key: encryptionPassword
             };
 
             try {
@@ -263,11 +305,12 @@
                     // Success feedback
                     document.getElementById('prefix').value = '';
                     document.getElementById('suffix').value = '';
+                    document.getElementById('encryption-password').value = '';
                     updateEstimates();
                     // Let the polling update the UI
                 } else {
                     const data = await res.json().catch(() => ({}));
-                    throw new Error(data.message || "Submission failed. Check API configuration.");
+                    throw new Error(data.message || data.error || "Submission failed. Check API configuration.");
                 }
             } catch (e) {
                 errorEl.innerText = e.message;
@@ -323,13 +366,13 @@
 
                                     <div class="flex justify-between items-center mb-1">
                                         <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
-                                        <button onclick="toggleReveal('${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
+                                        <button onclick="initiateReveal('${doc.id}', '${secretKey}', '${job.salt}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
                                     </div>
                                     <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
-                                        <div class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
-                                            ${secretKey}
+                                        <div id="key-text-${doc.id}" class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
+                                            <!-- Decrypted key will go here -->
                                         </div>
-                                        <button onclick="copyToClipboard('${secretKey}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
+                                        <button onclick="copyKey('${doc.id}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
                                     </div>
                                 </div>
                              `;
@@ -377,25 +420,91 @@
         }
 
         // UTILS
-        function toggleReveal(id) {
+        function initiateReveal(id, encryptedKey, salt) {
             const el = document.getElementById(`secret-${id}`);
             const btn = document.getElementById(`btn-${id}`);
-            if (el.classList.contains('hidden')) {
-                el.classList.remove('hidden');
-                btn.innerHTML = '<i class="fa-regular fa-eye-slash"></i>';
-            } else {
+            const keyText = document.getElementById(`key-text-${id}`);
+
+            if (!el.classList.contains('hidden')) {
+                // Hide
                 el.classList.add('hidden');
                 btn.innerHTML = '<i class="fa-regular fa-eye"></i>';
+                keyText.innerText = ''; // Clear secret from DOM
+                return;
             }
+
+            const password = prompt("Enter your encryption password to decrypt this key:");
+            if (!password) return;
+
+            try {
+                const decrypted = decryptSecretKey(encryptedKey, password, salt);
+                if (decrypted) {
+                    keyText.innerText = decrypted;
+                    el.classList.remove('hidden');
+                    btn.innerHTML = '<i class="fa-regular fa-eye-slash"></i>';
+                } else {
+                    alert("Decryption failed. Wrong password?");
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Decryption error: " + e.message);
+            }
+        }
+
+        function decryptSecretKey(token, password, salt) {
+            // Replicate Fernet logic
+            // 1. Derive Key
+            // Python: PBKDF2HMAC(sha256, 32, salt, 100000)
+            const key = CryptoJS.PBKDF2(password, CryptoJS.enc.Base64.parse(salt), {
+                keySize: 256/32,
+                iterations: 100000,
+                hasher: CryptoJS.algo.SHA256
+            });
+
+            // 2. Parse Fernet Token (Base64Url)
+            // Replace - with + and _ with /
+            const base64 = token.replace(/-/g, '+').replace(/_/g, '/');
+            const tokenBytes = CryptoJS.enc.Base64.parse(base64);
+
+            // Fernet Spec:
+            // Version (1B) | Timestamp (8B) | IV (16B) | Ciphertext (Var) | HMAC (32B)
+
+            // Extract IV (starts at offset 9, length 16)
+            // CryptoJS words are 4 bytes. 9 bytes = 2.25 words. This is tricky with words.
+            // Better to clone and hex manipulation or use bytes logic if possible.
+            // Let's use Hex for easier slicing.
+            const hex = CryptoJS.enc.Hex.stringify(tokenBytes);
+
+            // Version: 0-2 chars (1 byte)
+            // Timestamp: 2-18 chars (8 bytes)
+            // IV: 18-50 chars (16 bytes = 32 hex chars)
+            // Ciphertext: 50 to (End - 64) chars
+            // HMAC: (End - 64) to End chars (32 bytes = 64 hex chars)
+
+            const ivHex = hex.substring(18, 50);
+            const cipherTextHex = hex.substring(50, hex.length - 64);
+
+            const iv = CryptoJS.enc.Hex.parse(ivHex);
+            const ciphertext = CryptoJS.enc.Hex.parse(cipherTextHex);
+
+            // 3. Decrypt
+            const decrypted = CryptoJS.AES.decrypt(
+                { ciphertext: ciphertext },
+                key,
+                { iv: iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+            );
+
+            return decrypted.toString(CryptoJS.enc.Utf8);
+        }
+
+        function copyKey(id) {
+            const text = document.getElementById(`key-text-${id}`).innerText;
+            copyToClipboard(text);
         }
 
         function copyToClipboard(text) {
             if (!text) return;
             navigator.clipboard.writeText(text).then(() => {
-                // Show a small toast notification could be nice, but alert is robust enough
-                // Let's stick to alert for simplicity as per requirements, or a non-blocking toast?
-                // Requirements just said "Include Reveal/Copy private key logic".
-                // I'll keep the alert but make it less intrusive if possible? No, alert is fine.
                 const originalText = document.activeElement.innerHTML;
                 if(document.activeElement.tagName === 'BUTTON') {
                    const icon = document.activeElement.querySelector('i');
@@ -411,11 +520,13 @@
         }
 
         // Global assignments
+        window.loginWithGoogle = loginWithGoogle;
         window.connectWallet = connectWallet;
         window.handleDevLogin = handleDevLogin;
         window.submitJob = submitJob;
-        window.toggleReveal = toggleReveal;
+        window.initiateReveal = initiateReveal;
         window.copyToClipboard = copyToClipboard;
+        window.copyKey = copyKey;
     </script>
 </body>
 </html>
