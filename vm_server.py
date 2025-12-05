@@ -14,9 +14,14 @@ from solders.keypair import Keypair
 # Configuration
 PROJECT_ID = 'vanityforge'
 
-app = Flask(__name__)
+# Serve static files from the current directory
+app = Flask(__name__, static_folder='.', static_url_path='')
 # Strict CORS: Only allow requests from the specific frontend URL
 CORS(app, resources={r"/submit-job": {"origins": "https://tomaaytakin.github.io"}})
+
+@app.route('/')
+def index():
+    return app.send_static_file('index.html')
 
 # Global to track active jobs
 # Note: In a production server like Gunicorn, this might not work as expected if multiple workers are used for Flask itself.
