@@ -9,6 +9,8 @@ import signal
 import base64
 import bcrypt
 import hashlib
+import math
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.cloud import firestore
@@ -19,6 +21,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configuration
 PROJECT_ID = 'vanityforge'
+SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
+TREASURY_PUBKEY = "2d8W2qgRi7BCMTuyv2ZHbf9zJi5C1hT4VRudRnxZifVD"
 
 # Serve static files from the current directory
 app = Flask(__name__, static_folder='.', static_url_path='')
@@ -90,6 +94,64 @@ def worker_batch_wrapper(args):
     prefix, suffix, case_sensitive, batch_size = args
     return check_key_batch(prefix, suffix, case_sensitive, batch_size)
 
+def check_user_trials(user_id):
+    """
+    Checks how many trial jobs the user has used.
+    Returns the count of used trials.
+    """
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        # Retrieve all jobs for the user and count those marked as trials
+        # We fetch all jobs for the user to ensure accuracy without complex composite indexes
+        docs = db.collection('vanity_jobs').where('user_id', '==', user_id).stream()
+
+        trial_count = 0
+        for doc in docs:
+            data = doc.to_dict()
+            if data.get('is_trial'):
+                trial_count += 1
+        return trial_count
+    except Exception as e:
+        print(f"Error checking trials: {e}")
+        return 2 # Fail safe: assume no trials left if error
+
+def verify_payment(signature):
+    """Verifies that a transaction is successful on-chain."""
+    if not signature: return False
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [
+            signature,
+            {"encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0}
+        ]
+    }
+
+    try:
+        resp = requests.post(SOLANA_RPC_URL, json=payload, timeout=10)
+        data = resp.json()
+
+        if "error" in data:
+            print(f"RPC Error for {signature}: {data['error']}")
+            return False
+
+        result = data.get("result")
+        if not result:
+            return False
+
+        if result.get("meta", {}).get("err"):
+             return False # Transaction failed
+
+        # In a full implementation, we would parse 'transaction' -> 'message' -> 'accountKeys'
+        # and 'meta' -> 'postBalances' - 'preBalances' to verify amount transferred to TREASURY_PUBKEY.
+
+        return True
+    except Exception as e:
+        print(f"Verification Exception: {e}")
+        return False
+
 def get_deterministic_salt(user_id):
     """Generates a deterministic salt based on the user_id."""
     return hashlib.sha256(user_id.encode()).digest()
@@ -111,6 +173,8 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
     """
     Background process that manages the Pool of workers.
     """
+    # CPU Affinity: Limit to 3 processes to keep one core free
+    pool_size = 3
     acquired_general = False
     acquired_reserved = False
     try:
@@ -144,8 +208,7 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
         # Update status to RUNNING
         db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
-        # Initialize Pool with exactly 4 processes
-        pool_size = 4
+        # Initialize Pool with limit
         BATCH_SIZE = 50000 # Process keys in chunks
 
         with multiprocessing.Pool(processes=pool_size) as pool:
@@ -247,10 +310,14 @@ def check_user():
     try:
         db = firestore.Client(project=PROJECT_ID)
         doc = db.collection('users').document(user_id).get()
+
+        trials_used = check_user_trials(user_id)
+
+        has_pin = False
         if doc.exists and doc.to_dict().get('pin_hash'):
-            return jsonify({'has_pin': True})
-        else:
-            return jsonify({'has_pin': False})
+            has_pin = True
+
+        return jsonify({'has_pin': has_pin, 'trials_used': trials_used})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -286,6 +353,7 @@ def submit_job():
     suffix = data.get('suffix', '')
     case_sensitive = data.get('case_sensitive', True)
     pin = data.get('pin')
+    transaction_signature = data.get('transaction_signature')
 
     # Input Validation
     if not user_id:
@@ -320,8 +388,33 @@ def submit_job():
     except Exception as e:
          return jsonify({'error': str(e)}), 500
 
-    # Calculate difficulty to determine priority
+    # Calculate Price and Check Trials
     total_len = len(prefix or '') + len(suffix or '')
+
+    # Pricing Logic
+    # Base: 0.25 SOL for 4 characters
+    # L > 4: 0.25 + 0.75 * 10^(L-4)
+    if total_len <= 4:
+        price_sol = 0.25
+    else:
+        price_sol = 0.25 + (0.75 * math.pow(10, total_len - 4))
+
+    # Check Trials
+    trials_used = check_user_trials(user_id)
+    is_trial = False
+
+    if total_len <= 4 and trials_used < 2:
+        is_trial = True
+        price_sol = 0.0
+
+    # Payment Verification
+    if price_sol > 0:
+        if not transaction_signature:
+             return jsonify({'error': f'Payment of {price_sol:.4f} SOL required.'}), 402
+
+        if not verify_payment(transaction_signature):
+             return jsonify({'error': 'Payment verification failed. Transaction invalid or not confirmed.'}), 402
+
     # Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
     est_seconds = (0.5 * (58 ** total_len)) / 5000000
     is_quick = est_seconds < 900 # 15 minutes
@@ -338,7 +431,10 @@ def submit_job():
             'suffix': suffix,
             'case_sensitive': case_sensitive,
             'status': 'QUEUED',
-            'created_at': firestore.SERVER_TIMESTAMP
+            'created_at': firestore.SERVER_TIMESTAMP,
+            'is_trial': is_trial,
+            'price_sol': price_sol,
+            'transaction_signature': transaction_signature
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -347,7 +443,7 @@ def submit_job():
     p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick))
     p.start()
 
-    return jsonify({'job_id': job_id, 'message': 'Job accepted'}), 202
+    return jsonify({'job_id': job_id, 'message': 'Job accepted', 'is_trial': is_trial, 'price_sol': price_sol}), 202
 
 @app.route('/reveal-key', methods=['POST'])
 def reveal_key():

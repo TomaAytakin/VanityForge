@@ -8,6 +8,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 80px; }
@@ -217,6 +218,7 @@
         // STATE
         let currentUser = null;
         let jobListenerUnsubscribe = null;
+        let userTrialsUsed = 0;
 
         // AUDIO SYSTEM
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -379,6 +381,7 @@
                     body: JSON.stringify({ user_id: userId })
                 });
                 const data = await res.json();
+                userTrialsUsed = data.trials_used || 0;
 
                 if (data.has_pin) {
                     onLoginSuccess();
@@ -442,12 +445,23 @@
             if (totalLen === 0) {
                 document.getElementById('calc-difficulty').innerText = "0 chars";
                 document.getElementById('calc-time').innerText = "Instant";
-                document.getElementById('calc-cost').innerText = "0 Credits";
+                document.getElementById('calc-cost').innerText = "0 SOL";
                 return;
             }
 
-            // Cost = 10^(TotalLength - 1)
-            let cost = Math.pow(10, Math.max(0, totalLen - 1));
+            // Pricing Logic
+            let cost = 0;
+            if (totalLen <= 4) {
+                 cost = 0.25;
+            } else {
+                 cost = 0.25 + (0.75 * Math.pow(10, totalLen - 4));
+            }
+
+            // Check Trial
+            let isTrial = false;
+            if (totalLen <= 4 && userTrialsUsed < 2) {
+                isTrial = true;
+            }
 
             // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
             let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
@@ -461,7 +475,13 @@
 
             document.getElementById('calc-difficulty').innerText = totalLen + " chars";
             document.getElementById('calc-time').innerText = timeStr;
-            document.getElementById('calc-cost').innerText = cost.toLocaleString() + " Credits";
+
+            const costEl = document.getElementById('calc-cost');
+            if (isTrial) {
+                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${cost.toFixed(2)} SOL</span> <span class="text-green-400">FREE (Trial)</span>`;
+            } else {
+                 costEl.innerText = cost.toFixed(4) + " SOL";
+            }
         }
 
         ['prefix', 'suffix'].forEach(id => {
@@ -514,12 +534,68 @@
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
 
+            // Calculate Price & Check Payment
+            const totalLen = prefix.length + suffix.length;
+            let cost = 0;
+            if (totalLen <= 4) { cost = 0.25; }
+            else { cost = 0.25 + (0.75 * Math.pow(10, totalLen - 4)); }
+
+            let isTrial = (totalLen <= 4 && userTrialsUsed < 2);
+            let transactionSignature = null;
+
+            if (!isTrial && cost > 0) {
+                 if (!window.solana || !window.solana.isPhantom) {
+                     submitBtn.disabled = false;
+                     submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                     alert("Phantom Wallet is required for payment.");
+                     return;
+                 }
+
+                 try {
+                     // 1. Connect (if not already)
+                     if(!window.solana.isConnected) await window.solana.connect();
+
+                     // 2. Build Transaction
+                     // Treasury Address (Placeholder)
+                     const TREASURY_PUBKEY = new solanaWeb3.PublicKey("2d8W2qgRi7BCMTuyv2ZHbf9zJi5C1hT4VRudRnxZifVD");
+                     const fromPubkey = window.solana.publicKey;
+
+                     const transaction = new solanaWeb3.Transaction().add(
+                         solanaWeb3.SystemProgram.transfer({
+                             fromPubkey: fromPubkey,
+                             toPubkey: TREASURY_PUBKEY,
+                             lamports: Math.round(cost * solanaWeb3.LAMPORTS_PER_SOL)
+                         })
+                     );
+
+                     transaction.feePayer = fromPubkey;
+                     const { blockhash } = await (new solanaWeb3.Connection("https://api.mainnet-beta.solana.com")).getLatestBlockhash();
+                     transaction.recentBlockhash = blockhash;
+
+                     // 3. Sign and Send
+                     const { signature } = await window.solana.signAndSendTransaction(transaction);
+                     transactionSignature = signature;
+
+                     // Wait for confirmation? The prompt implies "accepts the transaction signature".
+                     // We'll send it to the backend for verification.
+
+                 } catch (err) {
+                     console.error(err);
+                     submitBtn.disabled = false;
+                     submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                     errorEl.innerText = "Payment failed: " + err.message;
+                     errorEl.classList.remove('hidden');
+                     return;
+                 }
+            }
+
             const payload = {
                 user_id: currentUser,
                 prefix: prefix,
                 suffix: suffix,
                 case_sensitive: caseSensitive,
-                pin: pin
+                pin: pin,
+                transaction_signature: transactionSignature
             };
 
             try {
@@ -530,6 +606,8 @@
                 });
 
                 if (res.ok) {
+                    // Update trials locally for immediate feedback
+                    if (isTrial) userTrialsUsed++;
                     // Success feedback
                     document.getElementById('prefix').value = '';
                     document.getElementById('suffix').value = '';
