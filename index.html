@@ -690,7 +690,9 @@
                      );
 
                      transaction.feePayer = fromPubkey;
-                     const connection = new solanaWeb3.Connection("https://rpc.ankr.com/solana", "confirmed");
+                     // Use the dedicated Helius endpoint
+                     // The user will replace the placeholder with their actual URL
+                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=967f5e67-6a0f-4a1f-b4c6-ad60984f2238", "confirmed");
                      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
 
