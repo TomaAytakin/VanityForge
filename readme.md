@@ -1,6 +1,6 @@
 # VanityForge: The Apex of Crypto Identity
 
-![VanityForge Main Banner](http://googleusercontent.com/image_generation_content/4)
+![VanityForge Main Banner](https://github.com/TomaAytakin/VanityForge/blob/main/assets/readmeherobanner.png)
 
 Welcome to **VanityForge**. You have arrived at the *absolute pinnacle* of Solana address generation. We provide what others cannot: **Unmatched Speed**, <u>Military-Grade Security</u>, and **24/7 Reliability**.
 
@@ -10,7 +10,7 @@ Stop settling for random addresses. Demand a customized identity that commands *
 
 ## 🔒 The "Fort Knox" Security Model
 
-![Bank Vault Security](http://googleusercontent.com/image_generation_content/5)
+![Bank Vault Security](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fortknoxreadme.png)
 
 We don't just "encrypt" your data. We lock it behind layers of **mathematical impossibilities**.
 
@@ -25,7 +25,7 @@ Your secrets are safer with **VanityForge** than they are in your own pocket.
 
 ## ☁️ "Fire and Forget" Cloud Persistence
 
-![Cloud Persistence](http://googleusercontent.com/image_generation_content/10)
+![Cloud Persistence](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fortknoxreadme.png)
 
 Why burn out your own CPU? **VanityForge** leverages the power of the cloud to work for you, **24/7**.
 
@@ -39,7 +39,7 @@ It is **effortless**. It is **relentless**. It is **VanityForge**.
 
 ## 🚀 Multi-Core Optimization
 
-![Technical Audit](http://googleusercontent.com/image_generation_content/7)
+![Technical Audit](http://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
 
 We don't waste a single cycle. Our engine is a *masterpiece* of efficiency.
 
