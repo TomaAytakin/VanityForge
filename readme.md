@@ -12,14 +12,19 @@ Stop settling for random addresses. Demand a customized identity that commands *
 
 ![Bank Vault Security](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fortknoxreadme.png)
 
-We don't just "encrypt" your data. We lock it behind layers of **mathematical impossibilities**.
+### For the Non-Technical User
+Think of VanityForge like a Swiss Bank Account:
+1.  **The Vault:** We provide the unbreakable storage facility.
+2.  **The Key:** You set a unique **Encryption PIN** that *only you know*.
+3.  **The Guarantee:** Even if we wanted to, we physically cannot open your vault. Without your specific PIN, your private key looks like random noise to us. **If you lose your PIN, the key is gone forever.** That is how secure it is.
 
-*   **Zero-Knowledge Storage**: Your private keys exist in RAM for exactly **0.05 seconds**—just long enough to be encrypted—before being wiped from memory forever.
-*   **Fernet Symmetric Encryption**: We use industry-standard Fernet encryption derived from your personal PIN. Without your PIN, the stored data is just *useless noise*.
-*   **Bcrypt Hashing**: Your PIN is hashed using `bcrypt`, the gold standard for password protection. Even if our servers were compromised, your PIN remains <u>unhackable</u>.
-*   **Ciphertext Only**: We only store the encrypted ciphertext. We **never** store your raw private key or your raw PIN.
-
-Your secrets are safer with **VanityForge** than they are in your own pocket.
+### For the Technical User
+Our security stack is built on **Client-Derived Server-Side Encryption** (`vm_server.py`):
+* **Ephemeral RAM Processing:** Your raw private key exists in Volatile Memory (RAM) for exactly **0.05 seconds**—just long enough to be generated and encrypted—before being overwritten and wiped.
+* **Fernet Symmetric Encryption:** We utilize the `cryptography` library to implement AES-128 encryption. The encryption key is dynamically derived from your PIN (salted and hashed) at the moment of request.
+* **Bcrypt PIN Hashing:** Your PIN is hashed using `bcrypt` before being stored for verification. We never store the raw PIN, preventing rainbow table attacks.
+* **Ciphertext Storage:** The database receives **<u>ONLY</u>** the encrypted ciphertext (`U2FsdGVk...`).
+* **Strict Isolation:** Decryption logic occurs purely server-side and *only* when triggered by a verified session with the correct PIN.
 
 ---
 
@@ -27,13 +32,13 @@ Your secrets are safer with **VanityForge** than they are in your own pocket.
 
 ![Cloud Persistence](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fireforgetreadme.png)
 
-Why burn out your own CPU? **VanityForge** leverages the power of the cloud to work for you, **24/7**.
+Why burn out your own CPU or battery? VanityForge leverages the raw power of **Dedicated Cloud Infrastructure**.
 
-*   **Always On**: Our dedicated Virtual Machines grind day and night.
-*   **Close Your Browser**: You can start a job, close your tab, turn off your computer, and walk away. We keep forging.
-*   **Seamless Recovery**: Come back anytime. Your keys will be waiting for you, securely encrypted and ready for retrieval.
-
-It is **effortless**. It is **relentless**. It is **VanityForge**.
+### The Always-On Engine
+Unlike browser-based generators that stop when your screen turns off, our engine runs on a **Google Compute Engine VM** hosted in a Tier-1 Data Center (`europe-west1`).
+* **Process Daemonization:** Our workers run as background daemons (`nohup`).
+* **Lifecycle Management:** You can start a job, close your browser, turn off your computer, and fly to another country. When you log back in, your job will still be grinding.
+* **Resilience:** We handle network interruptions and session disconnects gracefully. Your job state is persistent.
 
 ---
 
@@ -41,14 +46,33 @@ It is **effortless**. It is **relentless**. It is **VanityForge**.
 
 ![MULTICORE](https://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
 
-We don't waste a single cycle. Our engine is a *masterpiece* of efficiency.
+We don't waste a single cycle. Our engine is a **masterpiece** of efficiency and resource management.
 
-*   **Parallel Processing**: We utilize `multiprocessing` to saturate every available CPU core.
-*   **Optimized Grinding**: Our custom algorithms are tuned for maximum throughput on Solana's Ed25519 curve.
-*   **Scalable Power**: Whether you need a simple prefix or a rare 5-letter suffix, our infrastructure scales to meet the challenge.
+### The "3+1" CPU Affinity Architecture
+We have engineered a custom `multiprocessing` architecture to ensure maximum throughput without sacrificing responsiveness.
+* **The Muscle (3 Cores):** We dedicate **75% of our compute power** strictly to the grinding algorithm (utilizing `solders` and `base58` bindings for near-native Rust performance).
+* **The Brain (1 Core):** We reserve **1 dedicated vCPU** exclusively for the API, Payment Validation, and Database I/O. This guarantees that even under 100% load, the website remains snappy, payments process instantly, and you never face a timeout.
+* **CUDA CORE (2506 Core):** The next update will include the usage of cloud-run Nvidia Cuda Cores which will be 100x faster for generating wallets that requires more computational power (such as 6 letter suffixes).
 
 **VanityForge** isn't just a tool; it's a **powerhouse**.
 
+## 💸 Seamless Web3 Integration & Economics
+
+We have bridged the gap between Web2 ease-of-use and Web3 native value.
+
+* **Hybrid Authentication:** Login securely with **Google OAuth** (for ease) or connect directly via **Phantom Wallet** (for anonymity).
+* **Solana Native Payments:** Our pricing engine is built on Solana. The frontend integrates `web3.js` to trigger seamless, trustless transfers directly from your Phantom wallet to our Treasury.
+* **Dynamic Tiered Pricing:**
+    * **Trial Tier:** 2 Free generations for every user (Max 4 chars).
+    * **Beta Discount:** Currently offering a **50% Discount** on all premium tiers.
+    * **Fairness Algorithm:** Pricing scales exponentially with difficulty ($10^{(L-4)}$), ensuring the cost accurately reflects the computational resources required.
 ---
 
+## 🛠️ The Stack
+* **Infrastructure:** Google Compute Engine (Ubuntu 22.04 LTS), Firestore.
+* **Backend:** Python 3.11, Flask, Gunicorn, Multiprocessing.
+* **Frontend:** HTML5, Tailwind CSS, Firebase SDK, Solana Web3.js.
+* **Security:** `cryptography` (Fernet), `bcrypt`, `flask-cors`.
+
+_____________________________________________________________________________________
 *Secure your legacy on Solana today with VanityForge.*
