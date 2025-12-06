@@ -564,13 +564,6 @@ if __name__ == '__main__':
     # Reap zombie processes automatically
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 
-    # Bind to 0.0.0.0 on port 80 as requested
-    # Note: If running without root, port 80 might fail.
-    # We will try to run on port 80, but if it fails, we will suggest the user to run with sudo
-    # or handle it in environment.
-    # For now, I will keep 80 as per requirement, but if it fails in this sandbox, I will try 8080 temporarily.
-    try:
-        app.run(host='0.0.0.0', port=80)
-    except PermissionError:
-        print("Port 80 requires root. Running on 42531 for testing.")
-        app.run(host='0.0.0.0', port=42531)
+    # Bind to 127.0.0.1 (localhost) on port 8080 as requested for Caddy reverse proxy
+    # This ensures ONLY Caddy can talk to the app, blocking direct external access.
+    app.run(host='127.0.0.1', port=8080)
