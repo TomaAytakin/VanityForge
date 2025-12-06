@@ -11,6 +11,9 @@ import bcrypt
 import hashlib
 import math
 import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.cloud import firestore
@@ -23,6 +26,13 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 PROJECT_ID = 'vanityforge'
 SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 TREASURY_PUBKEY = "2d8W2qgRi7BCMTuyv2ZHbf9zJi5C1hT4VRudRnxZifVD"
+ADMIN_EMAIL = "tomaaytakin@gmail.com"
+
+# Email Configuration Placeholders
+SMTP_SERVER = "smtp.gmail.com" # Placeholder
+SMTP_PORT = 587
+SMTP_EMAIL = "your_email@gmail.com" # Placeholder
+SMTP_PASSWORD = "your_password" # Placeholder
 
 # Serve static files from the current directory
 app = Flask(__name__, static_folder='.', static_url_path='')
@@ -169,7 +179,38 @@ def generate_key_from_pin(pin, user_id):
     )
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
-def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick):
+def send_completion_email(to_email, job_id, public_key):
+    """Sends an email notification upon job completion."""
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = "VanityForge Job Complete!"
+
+        body = f"""
+        <html>
+          <body>
+            <h2>Your VanityForge Job is Complete!</h2>
+            <p><strong>Public Key:</strong> {public_key}</p>
+            <p>Your private key has been securely generated and encrypted.</p>
+            <p><a href="https://tomaaytakin.github.io">Log in to VanityForge</a> to reveal your private key.</p>
+            <br>
+            <p><em>Job ID: {job_id}</em></p>
+          </body>
+        </html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
+        server.quit()
+        print(f"Email sent to {to_email}")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
+def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick, email=None, notify=False):
     """
     Background process that manages the Pool of workers.
     """
@@ -280,6 +321,10 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
             })
             print(f"SECRET KEY SAVED for {job_id}")
 
+            # Send Email Notification
+            if notify and email:
+                send_completion_email(email, job_id, public_key)
+
             # Final Step: Delete checkpoint
             checkpoint_ref.delete()
 
@@ -354,6 +399,10 @@ def submit_job():
     case_sensitive = data.get('case_sensitive', True)
     pin = data.get('pin')
     transaction_signature = data.get('transaction_signature')
+    email = data.get('email')
+    notify = data.get('notify', False)
+
+    is_admin = (email == ADMIN_EMAIL)
 
     # Input Validation
     if not user_id:
@@ -381,9 +430,10 @@ def submit_job():
              return jsonify({'error': 'Invalid PIN.'}), 401
 
         # Check User Limit: Return 403 if user has QUEUED or RUNNING job
-        active_jobs = db.collection('vanity_jobs').where('user_id', '==', user_id).where('status', 'in', ['QUEUED', 'RUNNING']).get()
-        if len(list(active_jobs)) > 0:
-             return jsonify({'error': 'You can only run one job at a time.'}), 403
+        if not is_admin:
+            active_jobs = db.collection('vanity_jobs').where('user_id', '==', user_id).where('status', 'in', ['QUEUED', 'RUNNING']).get()
+            if len(list(active_jobs)) > 0:
+                return jsonify({'error': 'You can only run one job at a time.'}), 403
 
     except Exception as e:
          return jsonify({'error': str(e)}), 500
@@ -391,8 +441,8 @@ def submit_job():
     # Calculate Price and Check Trials
     total_len = len(prefix or '') + len(suffix or '')
 
-    # Hard Limit Enforcement (Beta)
-    if total_len > 5:
+    # Hard Limit Enforcement (Beta) - Bypassed for Admin
+    if not is_admin and total_len > 5:
         return jsonify({'error': 'Maximum 5 characters allowed in Beta.'}), 403
 
     # Fixed Pricing Logic (Pre-Discount)
@@ -420,12 +470,16 @@ def submit_job():
         is_trial = True
         price_sol = 0.0
 
-    # Trial Enforcement: Reject if cost is 0 but trials used up (Safety check)
-    if price_sol == 0 and trials_used >= 2:
+    if is_admin:
+        price_sol = 0.0
+        is_trial = True # Treat as free
+
+    # Trial Enforcement: Reject if cost is 0 but trials used up (Safety check) - Bypassed for Admin
+    if not is_admin and price_sol == 0 and trials_used >= 2:
          return jsonify({'error': 'Trial limit reached. Please pay to continue.'}), 403
 
-    # Payment Verification
-    if price_sol > 0:
+    # Payment Verification - Bypassed for Admin
+    if not is_admin and price_sol > 0:
         if not transaction_signature:
              return jsonify({'error': f'Payment of {price_sol:.4f} SOL required.'}), 402
 
@@ -451,13 +505,15 @@ def submit_job():
             'created_at': firestore.SERVER_TIMESTAMP,
             'is_trial': is_trial,
             'price_sol': price_sol,
-            'transaction_signature': transaction_signature
+            'transaction_signature': transaction_signature,
+            'email': email,
+            'notify': notify
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
     # Spawn Background Process
-    p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick))
+    p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick, email, notify))
     p.start()
 
     return jsonify({'job_id': job_id, 'message': 'Job accepted', 'is_trial': is_trial, 'price_sol': price_sol}), 202

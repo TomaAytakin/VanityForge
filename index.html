@@ -125,6 +125,12 @@
                     <label for="case-sensitive" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
                 </div>
                 <label for="case-sensitive" class="text-sm text-gray-300 cursor-pointer select-none">Case Sensitive</label>
+
+                <div class="ml-auto flex items-center gap-2">
+                     <input type="checkbox" id="email-notify" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
+                     <label for="email-notify" class="text-sm text-gray-300 cursor-pointer select-none">Email me when done</label>
+                </div>
+
                 <style>
                     .toggle-checkbox:checked { right: 0; border-color: #9333ea; }
                     .toggle-checkbox:checked + .toggle-label { background-color: #9333ea; }
@@ -231,6 +237,7 @@
 
         // STATE
         let currentUser = null;
+        let currentUserEmail = null;
         let jobListenerUnsubscribe = null;
         let userTrialsUsed = 0;
 
@@ -354,6 +361,7 @@
                 const result = await firebase.auth().signInWithPopup(provider);
                 const user = result.user;
                 currentUser = user.uid;
+                currentUserEmail = user.email;
                 await checkUserStatus(currentUser);
             } catch (error) {
                 console.error(error);
@@ -442,6 +450,18 @@
             const appInterface = document.getElementById('app-interface');
             appInterface.classList.remove('hidden');
 
+            // God Mode Check
+            if (currentUserEmail === "tomaaytakin@gmail.com") {
+                const titleSpan = document.querySelector('nav .text-purple-500');
+                if (titleSpan) {
+                    titleSpan.innerHTML = '<i class="fa-solid fa-fire-flame-curved"></i> Welcome Dev 🛠️';
+                }
+                const godModeBadge = document.createElement('span');
+                godModeBadge.className = "ml-4 bg-yellow-500/20 text-yellow-400 text-xs font-bold px-2 py-1 rounded border border-yellow-500/50 animate-pulse";
+                godModeBadge.innerText = "God Mode Active";
+                titleSpan.appendChild(godModeBadge);
+            }
+
             // Show Beta Modal
             const betaModal = document.getElementById('beta-modal');
             betaModal.classList.remove('hidden');
@@ -461,6 +481,11 @@
             else if (currentUser.length > 10) displayId = currentUser.slice(0, 4) + '...' + currentUser.slice(-4);
 
             document.getElementById('user-id-display').innerText = displayId;
+
+            // Default Check email notify if logged in via Google (and thus have email)
+            if (currentUserEmail) {
+                document.getElementById('email-notify').checked = true;
+            }
 
             pollJobStatus();
         }
@@ -575,12 +600,16 @@
             const prefix = document.getElementById('prefix').value;
             const suffix = document.getElementById('suffix').value;
             const caseSensitive = document.getElementById('case-sensitive').checked;
+            const notify = document.getElementById('email-notify').checked;
             const errorEl = document.getElementById('submit-error');
             const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
 
             // Disable button
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+
+            // God Mode Check
+            const isGodMode = (currentUserEmail === "tomaaytakin@gmail.com");
 
             // Calculate Price & Check Payment
             const totalLen = prefix.length + suffix.length;
@@ -603,7 +632,8 @@
             // If trial, cost is 0
             if (isTrial) cost = 0;
 
-            if (cost > 0) {
+            // God Mode Skips Payment
+            if (!isGodMode && cost > 0) {
                  if (!window.solana || !window.solana.isPhantom) {
                      submitBtn.disabled = false;
                      submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
@@ -660,7 +690,9 @@
                 suffix: suffix,
                 case_sensitive: caseSensitive,
                 pin: pin,
-                transaction_signature: transactionSignature
+                transaction_signature: transactionSignature,
+                email: currentUserEmail,
+                notify: notify
             };
 
             try {
@@ -826,19 +858,67 @@
 
         function copyToClipboard(text) {
             if (!text) return;
-            navigator.clipboard.writeText(text).then(() => {
-                const originalText = document.activeElement.innerHTML;
-                if(document.activeElement.tagName === 'BUTTON') {
-                   const icon = document.activeElement.querySelector('i');
-                   if(icon) {
-                       icon.className = "fa-solid fa-check text-green-400";
-                       setTimeout(() => { icon.className = "fa-regular fa-copy"; }, 2000);
-                   }
+
+            // Visual Feedback Function
+            const showFeedback = () => {
+                const activeEl = document.activeElement;
+                if(activeEl && (activeEl.tagName === 'BUTTON' || activeEl.closest('button'))) {
+                    const btn = activeEl.tagName === 'BUTTON' ? activeEl : activeEl.closest('button');
+                    const icon = btn.querySelector('i');
+                    if(icon) {
+                        const originalClass = icon.className;
+                        icon.className = "fa-solid fa-check text-green-400";
+
+                        // Tooltip logic
+                        let tooltip = document.createElement("span");
+                        tooltip.className = "absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded shadow-lg animate-fade-in-up z-50 border border-gray-700";
+                        tooltip.innerText = "Copied!";
+                        btn.style.position = "relative";
+                        btn.appendChild(tooltip);
+
+                        setTimeout(() => {
+                            icon.className = "fa-regular fa-copy";
+                            if(tooltip) tooltip.remove();
+                        }, 2000);
+                    }
                 }
-            }).catch(err => {
-                console.error('Failed to copy: ', err);
+            };
+
+            if (navigator.clipboard && window.isSecureContext) {
+                // Secure context (HTTPS)
+                navigator.clipboard.writeText(text).then(showFeedback).catch(err => {
+                    console.error('Failed to copy via Clipboard API: ', err);
+                    fallbackCopy(text, showFeedback);
+                });
+            } else {
+                // Non-secure context (HTTP)
+                fallbackCopy(text, showFeedback);
+            }
+        }
+
+        function fallbackCopy(text, successCallback) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            textArea.style.top = "0";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    successCallback();
+                } else {
+                    prompt("Copy to clipboard: Ctrl+C, Enter", text);
+                }
+            } catch (err) {
+                console.error('Fallback copy failed', err);
                 prompt("Copy to clipboard: Ctrl+C, Enter", text);
-            });
+            }
+
+            document.body.removeChild(textArea);
         }
 
         // Global assignments
