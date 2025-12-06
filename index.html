@@ -571,6 +571,24 @@
             });
         });
 
+        // EMAIL NOTIFICATION LOGIC
+        document.getElementById('email-notify').addEventListener('change', async function(e) {
+            if (this.checked && !currentUserEmail) {
+                const provider = new firebase.auth.GoogleAuthProvider();
+                try {
+                    const result = await firebase.auth().signInWithPopup(provider);
+                    const user = result.user;
+                    currentUser = user.uid;
+                    currentUserEmail = user.email;
+                    await checkUserStatus(currentUser);
+                } catch (error) {
+                    console.error("Email login failed:", error);
+                    this.checked = false;
+                    alert("Email is required for notifications.");
+                }
+            }
+        });
+
         // JOB SUBMISSION
         function startSubmissionFlow() {
              const prefix = document.getElementById('prefix').value;
@@ -639,16 +657,25 @@
 
             // God Mode Skips Payment
             if (!isGodMode && cost > 0) {
-                 if (!window.solana || !window.solana.isPhantom) {
-                     submitBtn.disabled = false;
-                     submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
-                     alert("Phantom Wallet is required for payment.");
-                     return;
+                 if (!window.solana || !window.solana.isConnected) {
+                     if (window.solana) {
+                         try {
+                             await window.solana.connect();
+                         } catch (err) {
+                             submitBtn.disabled = false;
+                             submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                             alert("Wallet required for payment");
+                             return;
+                         }
+                     } else {
+                         submitBtn.disabled = false;
+                         submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                         alert("Phantom Wallet is required for payment.");
+                         return;
+                     }
                  }
 
                  try {
-                     // 1. Connect (if not already)
-                     if(!window.solana.isConnected) await window.solana.connect();
 
                      // 2. Build Transaction
                      const TREASURY_PUBKEY = new solanaWeb3.PublicKey(TREASURY_WALLET_ADDRESS);
@@ -663,7 +690,7 @@
                      );
 
                      transaction.feePayer = fromPubkey;
-                     const connection = new solanaWeb3.Connection("https://api.mainnet-beta.solana.com");
+                     const connection = new solanaWeb3.Connection("https://rpc.ankr.com/solana", "confirmed");
                      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
 
