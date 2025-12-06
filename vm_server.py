@@ -36,8 +36,8 @@ SMTP_PASSWORD = "your_password" # Placeholder
 
 # Serve static files from the current directory
 app = Flask(__name__, static_folder='.', static_url_path='')
-# Strict CORS: Only allow requests from the specific frontend URL
-CORS(app, resources={r"/*": {"origins": "https://tomaaytakin.github.io"}})
+# Strict CORS: Allow requests from the specific frontend URL and custom domain
+CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
 
 @app.route('/')
 def index():

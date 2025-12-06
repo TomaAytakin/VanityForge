@@ -80,17 +80,9 @@
             <button onclick="loginWithGoogle()" class="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
                 <i class="fa-brands fa-google"></i> Login with Google
             </button>
-            <button onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+            <button id="connect-phantom-btn" onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
                 <i class="fa-solid fa-wallet"></i> Connect Phantom
             </button>
-        </div>
-
-        <div class="mt-8 border-t border-gray-700 pt-4">
-            <p class="text-xs text-gray-500 mb-2 cursor-pointer hover:text-gray-400 transition-colors" onclick="document.getElementById('dev-login').classList.toggle('hidden')">Dev Access</p>
-            <div id="dev-login" class="hidden flex gap-2 justify-center mt-2">
-                <input type="password" id="dev-password" placeholder="Enter Dev Password" class="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm focus:outline-none focus:border-purple-500 text-white placeholder-gray-500">
-                <button onclick="handleDevLogin()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm transition-colors">Enter</button>
-            </div>
         </div>
     </div>
 
@@ -218,7 +210,7 @@
     <script>
         // CONFIGURATION (HARDCODED)
         const TREASURY_WALLET_ADDRESS = "CUfjsGUee8u83dfFxHt1jXJUCRLiF1KoWVYcKyVforGe";
-        const API_URL = ""; // Relative path
+        const API_URL = "/submit-job"; // Relative path
         const FIREBASE_CONFIG = {
             apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
             authDomain: "vanityforge.firebaseapp.com",
@@ -381,17 +373,6 @@
                 }
             } else {
                 window.open("https://phantom.app/", "_blank");
-            }
-        }
-
-        function handleDevLogin() {
-            const pw = document.getElementById('dev-password').value;
-            if (pw === "123580-Toma") {
-                currentUser = "DEV_USER";
-                checkUserStatus(currentUser);
-            } else {
-                alert("Access Denied");
-                document.getElementById('dev-password').value = '';
             }
         }
 
@@ -924,7 +905,6 @@
         // Global assignments
         window.loginWithGoogle = loginWithGoogle;
         window.connectWallet = connectWallet;
-        window.handleDevLogin = handleDevLogin;
         window.startSubmissionFlow = startSubmissionFlow;
         window.submitJob = submitJob;
         window.revealKey = revealKey;
