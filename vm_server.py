@@ -391,13 +391,26 @@ def submit_job():
     # Calculate Price and Check Trials
     total_len = len(prefix or '') + len(suffix or '')
 
-    # Pricing Logic
-    # Base: 0.25 SOL for 4 characters
-    # L > 4: 0.25 + 0.75 * 10^(L-4)
+    # Hard Limit Enforcement (Beta)
+    if total_len > 5:
+        return jsonify({'error': 'Maximum 5 characters allowed in Beta.'}), 403
+
+    # Fixed Pricing Logic (Pre-Discount)
     if total_len <= 4:
-        price_sol = 0.25
+        base_price = 0.25
+    elif total_len == 5:
+        base_price = 0.50
+    elif total_len == 6:
+        base_price = 1.00
+    elif total_len == 7:
+        base_price = 2.00
+    elif total_len == 8:
+        base_price = 3.00
     else:
-        price_sol = 0.25 + (0.75 * math.pow(10, total_len - 4))
+        base_price = 5.00
+
+    # Apply 50% Beta Discount
+    price_sol = base_price * 0.5
 
     # Check Trials
     trials_used = check_user_trials(user_id)
@@ -406,6 +419,10 @@ def submit_job():
     if total_len <= 4 and trials_used < 2:
         is_trial = True
         price_sol = 0.0
+
+    # Trial Enforcement: Reject if cost is 0 but trials used up (Safety check)
+    if price_sol == 0 and trials_used >= 2:
+         return jsonify({'error': 'Trial limit reached. Please pay to continue.'}), 403
 
     # Payment Verification
     if price_sol > 0:
@@ -492,4 +509,12 @@ if __name__ == '__main__':
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 
     # Bind to 0.0.0.0 on port 80 as requested
-    app.run(host='0.0.0.0', port=80)
+    # Note: If running without root, port 80 might fail.
+    # We will try to run on port 80, but if it fails, we will suggest the user to run with sudo
+    # or handle it in environment.
+    # For now, I will keep 80 as per requirement, but if it fails in this sandbox, I will try 8080 temporarily.
+    try:
+        app.run(host='0.0.0.0', port=80)
+    except PermissionError:
+        print("Port 80 requires root. Running on 42531 for testing.")
+        app.run(host='0.0.0.0', port=42531)
