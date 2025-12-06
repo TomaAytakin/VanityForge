@@ -196,8 +196,22 @@
         </div>
     </div>
 
+    <!-- Beta Discount Modal -->
+    <div id="beta-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm hidden transition-opacity duration-300">
+        <div class="bg-gray-900 border border-purple-500 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform scale-95 transition-transform duration-300 text-center relative overflow-hidden" id="beta-modal-content">
+            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-pink-500"></div>
+            <i class="fa-solid fa-tags text-4xl text-purple-400 mb-4 animate-bounce"></i>
+            <h3 class="text-2xl font-bold text-white mb-2">Beta Access Unlocked!</h3>
+            <p class="text-gray-300 mb-6">You've received a <span class="text-purple-400 font-bold">50% Discount</span> on all vanity address generations during our Beta phase.</p>
+            <button onclick="closeBetaModal()" class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-2 px-6 rounded-lg shadow-lg transition transform hover:scale-105">
+                Let's Forge!
+            </button>
+        </div>
+    </div>
+
     <script>
         // CONFIGURATION (HARDCODED)
+        const TREASURY_WALLET_ADDRESS = "CUfjsGUee8u83dfFxHt1jXJUCRLiF1KoWVYcKyVforGe";
         const API_URL = ""; // Relative path
         const FIREBASE_CONFIG = {
             apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
@@ -415,10 +429,25 @@
             }
         }
 
+        function closeBetaModal() {
+            const modal = document.getElementById('beta-modal');
+            document.getElementById('beta-modal-content').classList.replace('scale-100', 'scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+
         function onLoginSuccess(isDev = false) {
             document.getElementById('auth-section').classList.add('hidden');
             const appInterface = document.getElementById('app-interface');
             appInterface.classList.remove('hidden');
+
+            // Show Beta Modal
+            const betaModal = document.getElementById('beta-modal');
+            betaModal.classList.remove('hidden');
+             setTimeout(() => {
+                document.getElementById('beta-modal-content').classList.replace('scale-95', 'scale-100');
+            }, 10);
 
             // Simple fade in effect
             appInterface.style.opacity = 0;
@@ -449,18 +478,23 @@
                 return;
             }
 
-            // Pricing Logic
-            let cost = 0;
-            if (totalLen <= 4) {
-                 cost = 0.25;
-            } else {
-                 cost = 0.25 + (0.75 * Math.pow(10, totalLen - 4));
-            }
+            // Fixed Pricing Logic
+            let basePrice = 0;
+            if (totalLen <= 4) basePrice = 0.25;
+            else if (totalLen === 5) basePrice = 0.50;
+            else if (totalLen === 6) basePrice = 1.00;
+            else if (totalLen === 7) basePrice = 2.00;
+            else if (totalLen === 8) basePrice = 3.00;
+            else basePrice = 5.00;
+
+            // Apply 50% Discount
+            let finalPrice = basePrice * 0.5;
 
             // Check Trial
             let isTrial = false;
             if (totalLen <= 4 && userTrialsUsed < 2) {
                 isTrial = true;
+                finalPrice = 0;
             }
 
             // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
@@ -478,9 +512,23 @@
 
             const costEl = document.getElementById('calc-cost');
             if (isTrial) {
-                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${cost.toFixed(2)} SOL</span> <span class="text-green-400">FREE (Trial)</span>`;
+                 // Trial UI: <del>0.25 SOL</del> FREE (Trial)
+                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-green-400">FREE (Trial)</span>`;
             } else {
-                 costEl.innerText = cost.toFixed(4) + " SOL";
+                 // Discount UI: <del>1.0 SOL</del> 0.5 SOL
+                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-purple-400">${finalPrice.toFixed(2)} SOL</span>`;
+            }
+
+            // Hard Limit Warning
+            if (totalLen > 5) {
+                document.getElementById('submit-error').innerText = "Maximum 5 characters allowed in Beta.";
+                document.getElementById('submit-error').classList.remove('hidden');
+                document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = true;
+                document.querySelector('button[onclick="startSubmissionFlow()"]').classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                document.getElementById('submit-error').classList.add('hidden');
+                document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = false;
+                document.querySelector('button[onclick="startSubmissionFlow()"]').classList.remove('opacity-50', 'cursor-not-allowed');
             }
         }
 
@@ -536,14 +584,26 @@
 
             // Calculate Price & Check Payment
             const totalLen = prefix.length + suffix.length;
-            let cost = 0;
-            if (totalLen <= 4) { cost = 0.25; }
-            else { cost = 0.25 + (0.75 * Math.pow(10, totalLen - 4)); }
+
+            // Fixed Pricing Logic
+            let basePrice = 0;
+            if (totalLen <= 4) basePrice = 0.25;
+            else if (totalLen === 5) basePrice = 0.50;
+            else if (totalLen === 6) basePrice = 1.00;
+            else if (totalLen === 7) basePrice = 2.00;
+            else if (totalLen === 8) basePrice = 3.00;
+            else basePrice = 5.00;
+
+            // Apply 50% Discount
+            let cost = basePrice * 0.5;
 
             let isTrial = (totalLen <= 4 && userTrialsUsed < 2);
             let transactionSignature = null;
 
-            if (!isTrial && cost > 0) {
+            // If trial, cost is 0
+            if (isTrial) cost = 0;
+
+            if (cost > 0) {
                  if (!window.solana || !window.solana.isPhantom) {
                      submitBtn.disabled = false;
                      submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
@@ -556,8 +616,7 @@
                      if(!window.solana.isConnected) await window.solana.connect();
 
                      // 2. Build Transaction
-                     // Treasury Address (Placeholder)
-                     const TREASURY_PUBKEY = new solanaWeb3.PublicKey("2d8W2qgRi7BCMTuyv2ZHbf9zJi5C1hT4VRudRnxZifVD");
+                     const TREASURY_PUBKEY = new solanaWeb3.PublicKey(TREASURY_WALLET_ADDRESS);
                      const fromPubkey = window.solana.publicKey;
 
                      const transaction = new solanaWeb3.Transaction().add(
@@ -569,15 +628,21 @@
                      );
 
                      transaction.feePayer = fromPubkey;
-                     const { blockhash } = await (new solanaWeb3.Connection("https://api.mainnet-beta.solana.com")).getLatestBlockhash();
+                     const connection = new solanaWeb3.Connection("https://api.mainnet-beta.solana.com");
+                     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
 
                      // 3. Sign and Send
                      const { signature } = await window.solana.signAndSendTransaction(transaction);
                      transactionSignature = signature;
 
-                     // Wait for confirmation? The prompt implies "accepts the transaction signature".
-                     // We'll send it to the backend for verification.
+                     // 4. Wait for Confirmation
+                     submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Confirming Payment...';
+                     await connection.confirmTransaction({
+                         signature: signature,
+                         blockhash: blockhash,
+                         lastValidBlockHeight: lastValidBlockHeight
+                     });
 
                  } catch (err) {
                      console.error(err);
