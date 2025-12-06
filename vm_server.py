@@ -442,7 +442,7 @@ def submit_job():
     total_len = len(prefix or '') + len(suffix or '')
 
     # Hard Limit Enforcement (Beta) - Bypassed for Admin
-    if not is_admin and total_len > 5:
+    if total_len > 5 and email != ADMIN_EMAIL:
         return jsonify({'error': 'Maximum 5 characters allowed in Beta.'}), 403
 
     # Fixed Pricing Logic (Pre-Discount)

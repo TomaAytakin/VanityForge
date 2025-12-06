@@ -242,10 +242,10 @@
         });
 
         // STATE
-        let currentUser = null;
-        let currentUserEmail = null;
-        let jobListenerUnsubscribe = null;
-        let userTrialsUsed = 0;
+        var currentUser = null;
+        var currentUserEmail = null;
+        var jobListenerUnsubscribe = null;
+        var userTrialsUsed = 0;
 
         // AUDIO SYSTEM
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -550,7 +550,7 @@
             }
 
             // Hard Limit Warning
-            if (totalLen > 5) {
+            if (totalLen > 5 && currentUserEmail !== "tomaaytakin@gmail.com") {
                 document.getElementById('submit-error').innerText = "Maximum 5 characters allowed in Beta.";
                 document.getElementById('submit-error').classList.remove('hidden');
                 document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = true;
