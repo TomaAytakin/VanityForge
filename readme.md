@@ -82,6 +82,25 @@ We have bridged the gap between Web2 ease-of-use and Web3 native value.
     * **Fairness Algorithm:** Pricing scales exponentially with difficulty ($10^{(L-4)}$), ensuring the cost accurately reflects the computational resources required.
 ---
 
+## 🗺️ Project Roadmap
+
+### Phase 1: Foundation (COMPLETED ✅)
+*   **Establish 4-Core Cloud VM Infrastructure.**
+*   **Implement Multi-Core CPU Grinding Algorithm.**
+*   **Launch Web3 Login (Phantom Wallet & Google OAuth).**
+*   **Deploy Banking-Grade Security (Client-Side Encryption & Zero-Knowledge Storage).**
+
+### Phase 2: Monetization & Polish (IN PROGRESS 🚧)
+*   **Implement Solana Payment Gateway (Pay-Per-Forge).**
+*   **Launch $VFORGE Token via pump.fun (The official utility token).**
+*   **Deploy Email Notification System for long-running jobs.**
+*   **Expand capacity to 8-Core 'Fast Track' nodes.**
+
+### Phase 3: The Singularity (FUTURE 🔮)
+*   **GPU Acceleration: Migrate to NVIDIA CUDA cores for 100x speed.**
+*   **Instant Forge: Sub-minute delivery for 7-character vanity addresses.**
+*   **Dao Governance: $VFORGE holders vote on fee structures and new features.**
+
 ## 🛠️ The Stack
 * **Infrastructure:** Google Compute Engine (Ubuntu 22.04 LTS), Firestore.
 * **Backend:** Python 3.11, Flask, Gunicorn, Multiprocessing.
