@@ -214,8 +214,8 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
     """
     Background process that manages the Pool of workers.
     """
-    # CPU Affinity: Limit to 3 processes to keep one core free
-    pool_size = 3
+    # CPU Affinity: Limit to cpu_count - 1 to keep one core free
+    pool_size = max(1, multiprocessing.cpu_count() - 1)
     acquired_general = False
     acquired_reserved = False
     try:
@@ -563,6 +563,9 @@ def reveal_key():
 if __name__ == '__main__':
     # Reap zombie processes automatically
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+
+    pool_size = max(1, multiprocessing.cpu_count() - 1)
+    print(f"Detected {multiprocessing.cpu_count()} cores. Starting {pool_size} grinder processes.")
 
     # Bind to 127.0.0.1 (localhost) on port 8080 as requested for Caddy reverse proxy
     # This ensures ONLY Caddy can talk to the app, blocking direct external access.
