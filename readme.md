@@ -39,7 +39,7 @@ It is **effortless**. It is **relentless**. It is **VanityForge**.
 
 ## 🚀 Multi-Core Optimization
 
-![MULTICORE](http://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
+![MULTICORE](https://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
 
 We don't waste a single cycle. Our engine is a *masterpiece* of efficiency.
 
