@@ -25,7 +25,7 @@ Your secrets are safer with **VanityForge** than they are in your own pocket.
 
 ## ☁️ "Fire and Forget" Cloud Persistence
 
-![Cloud Persistence](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fortknoxreadme.png)
+![Cloud Persistence](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fireforgetreadme.png)
 
 Why burn out your own CPU? **VanityForge** leverages the power of the cloud to work for you, **24/7**.
 
@@ -39,7 +39,7 @@ It is **effortless**. It is **relentless**. It is **VanityForge**.
 
 ## 🚀 Multi-Core Optimization
 
-![Technical Audit](http://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
+![MULTICORE](http://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
 
 We don't waste a single cycle. Our engine is a *masterpiece* of efficiency.
 
