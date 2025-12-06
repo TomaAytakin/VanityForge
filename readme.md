@@ -12,6 +12,12 @@ Stop settling for random addresses. Demand a customized identity that commands *
 
 ![Bank Vault Security](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fortknoxreadme.png)
 
+### 🏆 Certified Security: Rated 'A'
+
+![Qualys SSL Labs A Rating](assets/sslqual.png)
+
+We don't just encrypt your data; we secure the transport layer itself. VanityForge has achieved an 'A' Rating from Qualys SSL Labs—the industry gold standard. This score confirms our use of modern Elliptic Curve Cryptography (ECC), strict TLS 1.3 enforcement via Caddy, and perfect forward secrecy. Your connection is as secure as a banking portal.
+
 ### For the Non-Technical User
 Think of VanityForge like a Swiss Bank Account:
 1.  **The Vault:** We provide the unbreakable storage facility.
