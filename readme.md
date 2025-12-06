@@ -18,6 +18,20 @@ Think of VanityForge like a Swiss Bank Account:
 2.  **The Key:** You set a unique **Encryption PIN** that *only you know*.
 3.  **The Guarantee:** Even if we wanted to, we physically cannot open your vault. Without your specific PIN, your private key looks like random noise to us. **If you lose your PIN, the key is gone forever.** That is how secure it is.
 
+Imagine you are staying at a futuristic hotel. You want to store a precious diamond (your Private Key) in the room safe.
+
+The Creation: Our automated robot places the diamond inside the safe for you. The door is wide open.
+
+The Lock: You type in a 4-digit PIN that only you know.
+
+The Magic: The moment you hit "Enter," the safe locks, and the robot suffers "amnesia"—it instantly forgets the PIN you just typed.
+
+The Storage: We (the hotel staff) guard the room. We can see the safe on the wall. We can verify it is locked. But we cannot open it because we don't know the code, and we have no master key.
+
+The Access: When you return and type the PIN, the safe opens.
+
+The Risk: If you forget your PIN, no one—not even the hotel manager—can open that safe. The diamond is locked inside forever.
+
 ### For the Technical User
 Our security stack is built on **Client-Derived Server-Side Encryption** (`vm_server.py`):
 * **Ephemeral RAM Processing:** Your raw private key exists in Volatile Memory (RAM) for exactly **0.05 seconds**—just long enough to be generated and encrypted—before being overwritten and wiped.
