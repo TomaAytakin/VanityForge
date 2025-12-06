@@ -228,6 +228,19 @@
         }
         const db = firebase.firestore();
 
+        // CHECK REDIRECT RESULT
+        firebase.auth().getRedirectResult().then((result) => {
+            if (result.user) {
+                const user = result.user;
+                currentUser = user.uid;
+                currentUserEmail = user.email;
+                checkUserStatus(currentUser);
+            }
+        }).catch((error) => {
+            console.error("Redirect Login Error:", error);
+            // Optional: alert(error.message);
+        });
+
         // STATE
         let currentUser = null;
         let currentUserEmail = null;
@@ -357,8 +370,18 @@
                 currentUserEmail = user.email;
                 await checkUserStatus(currentUser);
             } catch (error) {
-                console.error(error);
-                alert("Google Login Failed: " + error.message);
+                console.error("Popup error:", error);
+                if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+                    console.warn("Popup blocked or closed, falling back to redirect...");
+                    try {
+                        await firebase.auth().signInWithRedirect(provider);
+                    } catch (redirectError) {
+                        console.error("Redirect error:", redirectError);
+                        alert("Login failed: " + redirectError.message);
+                    }
+                } else {
+                    alert("Google Login Failed: " + error.message);
+                }
             }
         }
 
