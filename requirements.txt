@@ -1,6 +1,7 @@
 Flask
 flask-cors
 google-cloud-firestore
+google-cloud-run
 solders
 base58
 cryptography
