@@ -5,3 +5,5 @@ solders
 base58
 cryptography
 bcrypt
+python-dotenv
+requests
