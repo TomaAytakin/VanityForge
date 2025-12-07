@@ -300,8 +300,8 @@ def scheduler_loop():
                         
                         # Cleanup temp PIN
                         db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
-                        running_local += 1
-
+                        # FIX: Removed the redundant and blocking 'running_local += 1'
+                        
         except Exception as e:
             # The database index failure logs here.
             print(f"Scheduler Error: {e}")
