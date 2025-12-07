@@ -57,6 +57,7 @@ def faq(): return app.send_static_file('faq.html')
 MAX_CONCURRENT_JOBS = 6
 sem_general = multiprocessing.Semaphore(4)
 sem_reserved = multiprocessing.Semaphore(2)
+GPU_OFFLOAD_THRESHOLD = 5
 
 def is_base58(s):
     if not s: return True
@@ -274,8 +275,11 @@ def submit_job():
             'transaction_signature': tx_sig, 'email': email, 'notify': notify
         })
         
-        p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin, est < 900, email, notify))
-        p.start()
+        if total_len >= GPU_OFFLOAD_THRESHOLD:
+            print(f"Offloading Job {job_id} (Length {total_len}) to GPU Worker.")
+        else:
+            p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin, est < 900, email, notify))
+            p.start()
         return jsonify({'job_id': job_id, 'message': 'Accepted'}), 202
 
     except Exception as e: return jsonify({'error': str(e)}), 500
