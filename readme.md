@@ -1,6 +1,6 @@
 # VanityForge: The Apex of Crypto Identity
 
-![VanityForge Main Banner](https://github.com/TomaAytakin/VanityForge/blob/main/assets/readmeherobanner.png)
+![VanityForge Main Banner](assets/readmeherobanner.png)
 
 Welcome to **VanityForge**. You have arrived at the *absolute pinnacle* of Solana address generation. We provide what others cannot: **Unmatched Speed**, <u>Military-Grade Security</u>, and **24/7 Reliability**.
 
@@ -22,7 +22,7 @@ We are not afraid of competition. Our competitive edge lies not in secret code, 
 
 ## 🔒 The "Fort Knox" Security Model
 
-![Bank Vault Security](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fortknoxreadme.png)
+![Bank Vault Security](assets/fortknoxreadme.png)
 
 ### 🏆 Certified Security: Rated 'A'
 
@@ -62,7 +62,7 @@ Our security stack is built on **Client-Derived Server-Side Encryption** (`vm_se
 
 ## ☁️ "Fire and Forget" Cloud Persistence
 
-![Cloud Persistence](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fireforgetreadme.png)
+![Cloud Persistence](assets/fireforgetreadme.png)
 
 Why burn out your own CPU or battery? VanityForge leverages the raw power of **Dedicated Cloud Infrastructure**.
 
@@ -76,7 +76,7 @@ Unlike browser-based generators that stop when your screen turns off, our engine
 
 ## 🚀 Multi-Core Optimization
 
-![MULTICORE](https://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
+![MULTICORE](assets/multiprocreadme.png)
 
 We don't waste a single cycle. Our engine is a **masterpiece** of efficiency and resource management.
 
@@ -84,7 +84,7 @@ We don't waste a single cycle. Our engine is a **masterpiece** of efficiency and
 We have engineered a custom `multiprocessing` architecture to ensure maximum throughput without sacrificing responsiveness.
 * **The Muscle (3 Cores):** We dedicate **75% of our compute power** strictly to the grinding algorithm (utilizing `solders` and `base58` bindings for near-native Rust performance).
 * **The Brain (1 Core):** We reserve **1 dedicated vCPU** exclusively for the API, Payment Validation, and Database I/O. This guarantees that even under 100% load, the website remains snappy, payments process instantly, and you never face a timeout.
-* **CUDA CORE (2506 Core):** The next update will include the usage of cloud-run Nvidia Cuda Cores which will be 100x faster for generating wallets that requires more computational power (such as 6 letter suffixes).
+* **CUDA CORE (2506 Core):** The next update will include the usage of cloud-run NVIDIA CUDA Cores which will be 100x faster for generating wallets that require more computational power (such as 6 letter suffixes).
 
 **VanityForge** isn't just a tool; it's a **powerhouse**.
 
@@ -97,7 +97,7 @@ We have bridged the gap between Web2 ease-of-use and Web3 native value.
 * **Dynamic Tiered Pricing:**
     * **Trial Tier:** 2 Free generations for every user (Max 4 chars).
     * **Beta Discount:** Currently offering a **50% Discount** on all premium tiers.
-    * **Fairness Algorithm:** Pricing scales exponentially with difficulty ($10^{(L-4)}$), ensuring the cost accurately reflects the computational resources required.
+    *   **Fairness Algorithm:** Pricing is tiered based on difficulty, ensuring the cost accurately reflects the computational resources required.
 ---
 
 ## 🗺️ Project Roadmap
@@ -117,7 +117,7 @@ We have bridged the gap between Web2 ease-of-use and Web3 native value.
 ### Phase 3: The Singularity (FUTURE 🔮)
 *   **GPU Acceleration: Migrate to NVIDIA CUDA cores for 100x speed.**
 *   **Instant Forge: Sub-minute delivery for 7-character vanity addresses.**
-*   **Dao Governance: $VFORGE holders vote on fee structures and new features.**
+*   **DAO Governance: $VFORGE holders vote on fee structures and new features.**
 
 ## 🛠️ The Stack
 * **Infrastructure:** Google Compute Engine (Ubuntu 22.04 LTS), Firestore.
