@@ -101,11 +101,13 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
 
 # --- LOCAL CPU LOGIC ---
 def check_key_batch(prefix, suffix, case_sensitive, batch_size):
+    prefix_str = prefix or ""
+    suffix_str = suffix or ""
     for i in range(batch_size):
         kp = Keypair()
         pub = str(kp.pubkey())
-        p_match = pub.startswith(prefix) if case_sensitive else pub.lower().startswith(prefix.lower())
-        s_match = pub.endswith(suffix) if case_sensitive else pub.lower().endswith(suffix.lower())
+        p_match = pub.startswith(prefix_str) if case_sensitive else pub.lower().startswith(prefix_str.lower())
+        s_match = pub.endswith(suffix_str) if case_sensitive else pub.lower().endswith(suffix_str.lower())
         if (not prefix or p_match) and (not suffix or s_match):
             return (str(kp.pubkey()), base58.b58encode(bytes(kp)).decode('ascii'), i + 1)
     return (None, None, batch_size)
@@ -258,49 +260,62 @@ def scheduler_loop():
             queued_docs = db.collection('vanity_jobs').where('status', '==', 'QUEUED').order_by('created_at').limit(10).stream()
             
             for doc in queued_docs:
-                data = doc.to_dict()
-                job_id = data.get('job_id')
-                is_cloud = data.get('is_cloud', False)
-                
-                # Retrieve the temporary PIN needed for encryption
-                pin_plain = data.get('temp_pin')
-                if not pin_plain:
-                    # Error state: Lost PIN? Fail job to clear queue
-                    print(f"❌ Job {job_id} missing temp_pin, marking FAILED")
-                    db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'PIN missing in queue'})
-                    continue
+                try:
+                    data = doc.to_dict()
+                    job_id = data.get('job_id')
+                    is_cloud = data.get('is_cloud', False)
 
-                # --- DISPATCH LOGIC ---
-                if is_cloud:
-                    # RULE: Cloud jobs (Paid/Hard) -> Cloud Run Queue
-                    if running_cloud < MAX_CLOUD_JOBS:
-                        print(f"🚦 Dispatching Cloud Job: {job_id}")
-                        db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
-                        
-                        # Cleanup temp PIN for security BEFORE dispatching
-                        db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
-                        
-                        # Trigger Cloud Run (AFTER security cleanup)
-                        dispatch_cloud_job(job_id, data['user_id'], data['prefix'], data['suffix'], data['case_sensitive'], pin_plain)
-                        
-                        running_cloud += 1
-                
-                else:
-                    # RULE: Local jobs (Free/Easy) -> VM Queue
-                    if running_local < MAX_LOCAL_JOBS:
-                        print(f"🚦 Starting Local Job: {job_id}")
-                        db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
-                        
-                        est_seconds = (0.5 * (58 ** (len(data.get('prefix') or '') + len(data.get('suffix') or '')))) / 5000000
-                        is_quick = est_seconds < 900
-                        
-                        # Start Local Process (NOTE: pin_plain is passed securely to the worker)
-                        p = multiprocessing.Process(target=background_grinder, args=(job_id, data['user_id'], data['prefix'], data['suffix'], data['case_sensitive'], pin_plain, is_quick, data.get('email'), data.get('notify')))
-                        p.start()
-                        
-                        # Cleanup temp PIN
-                        db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
-                        running_local += 1
+                    # Retrieve the temporary PIN needed for encryption
+                    pin_plain = data.get('temp_pin')
+                    if not pin_plain:
+                        # Error state: Lost PIN? Fail job to clear queue
+                        print(f"❌ Job {job_id} missing temp_pin, marking FAILED")
+                        db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'PIN missing in queue'})
+                        continue
+
+                    # --- DISPATCH LOGIC ---
+                    if is_cloud:
+                        # RULE: Cloud jobs (Paid/Hard) -> Cloud Run Queue
+                        if running_cloud < MAX_CLOUD_JOBS:
+                            print(f"🚦 Dispatching Cloud Job: {job_id}")
+                            db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+
+                            # Cleanup temp PIN for security BEFORE dispatching
+                            db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
+
+                            # Trigger Cloud Run (AFTER security cleanup)
+                            dispatch_cloud_job(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain)
+
+                            running_cloud += 1
+
+                    else:
+                        # RULE: Local jobs (Free/Easy) -> VM Queue
+                        if running_local < MAX_LOCAL_JOBS:
+                            print(f"🚦 Starting Local Job: {job_id}")
+                            # Update status FIRST to reserve slot
+                            db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+
+                            est_seconds = (0.5 * (58 ** (len(data.get('prefix') or '') + len(data.get('suffix') or '')))) / 5000000
+                            is_quick = est_seconds < 900
+
+                            # Start Local Process (NOTE: pin_plain is passed securely to the worker)
+                            try:
+                                p = multiprocessing.Process(target=background_grinder, args=(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain, is_quick, data.get('email'), data.get('notify')))
+                                p.start()
+                                running_local += 1
+                            except Exception as pe:
+                                print(f"❌ Failed to start process for {job_id}: {pe}")
+                                db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': f"Process Start Failed: {pe}"})
+                                continue
+
+                            # Cleanup temp PIN
+                            db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
+
+                except Exception as e:
+                    print(f"❌ Error processing job {doc.id}: {e}")
+                    try:
+                        db.collection('vanity_jobs').document(doc.id).update({'status': 'FAILED', 'error': str(e)})
+                    except: pass
 
         except Exception as e:
             # The database index failure logs here.
