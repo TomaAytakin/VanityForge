@@ -125,8 +125,8 @@ def check_user_trials(user_id):
         print(f"Error checking trials: {e}")
         return 2 # Fail safe: assume no trials left if error
 
-def verify_payment(signature):
-    """Verifies that a transaction is successful on-chain."""
+def verify_payment(signature, required_price_sol):
+    """Verifies that a transaction is successful on-chain and amount is correct."""
     if not signature: return False
 
     payload = {
@@ -154,8 +154,41 @@ def verify_payment(signature):
         if result.get("meta", {}).get("err"):
              return False # Transaction failed
 
-        # In a full implementation, we would parse 'transaction' -> 'message' -> 'accountKeys'
-        # and 'meta' -> 'postBalances' - 'preBalances' to verify amount transferred to TREASURY_PUBKEY.
+        # Parse transaction to verify payment
+        transaction = result.get("transaction", {})
+        message = transaction.get("message", {})
+        account_keys = message.get("accountKeys", [])
+
+        treasury_index = -1
+        for i, key in enumerate(account_keys):
+            # Handle both string keys and object keys (V0 transactions)
+            key_str = key if isinstance(key, str) else key.get("pubkey")
+            if key_str == TREASURY_PUBKEY:
+                treasury_index = i
+                break
+
+        if treasury_index == -1:
+            print(f"Treasury address {TREASURY_PUBKEY} not found in transaction {signature}")
+            return False
+
+        meta = result.get("meta", {})
+        pre_balances = meta.get("preBalances", [])
+        post_balances = meta.get("postBalances", [])
+
+        if treasury_index >= len(pre_balances) or treasury_index >= len(post_balances):
+            print(f"Balance data missing for index {treasury_index}")
+            return False
+
+        pre_bal = pre_balances[treasury_index]
+        post_bal = post_balances[treasury_index]
+        received_lamports = post_bal - pre_bal
+
+        required_lamports = int(required_price_sol * 1_000_000_000)
+
+        # Check if received amount is sufficient
+        if received_lamports < required_lamports:
+            print(f"Insufficient payment. Received: {received_lamports}, Required: {required_lamports}")
+            return False
 
         return True
     except Exception as e:
@@ -483,8 +516,8 @@ def submit_job():
         if not transaction_signature:
              return jsonify({'error': f'Payment of {price_sol:.4f} SOL required.'}), 402
 
-        if not verify_payment(transaction_signature):
-             return jsonify({'error': 'Payment verification failed. Transaction invalid or not confirmed.'}), 402
+        if not verify_payment(transaction_signature, price_sol):
+             return jsonify({'error': 'Payment verification failed. Transaction invalid, unconfirmed, or insufficient amount.'}), 402
 
     # Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
     est_seconds = (0.5 * (58 ** total_len)) / 5000000
