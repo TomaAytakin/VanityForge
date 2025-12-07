@@ -12,12 +12,12 @@ import hashlib
 import math
 import requests
 import smtplib
-import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.cloud import firestore
+from google.cloud import run_v2  # <--- CRITICAL IMPORT
 from solders.keypair import Keypair
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -27,23 +27,24 @@ from dotenv import load_dotenv
 # 1. LOAD SECRETS
 load_dotenv()
 
-# 2. CONFIGURATION (READ FROM SAFE)
+# 2. CONFIGURATION
 PROJECT_ID = os.getenv('PROJECT_ID', 'vanityforge')
 SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL')
 TREASURY_PUBKEY = os.getenv('TREASURY_PUBKEY')
-GPU_SERVICE_URL = os.getenv('GPU_SERVICE_URL')
 SMTP_EMAIL = os.getenv('SMTP_EMAIL')
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
 
+# GPU CONFIGURATION
+GPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker"
+
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
     print("CRITICAL ERROR: Missing environment variables. Make sure .env exists.")
     exit(1)
 
-# Serve static files from the current directory
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
 
@@ -59,12 +60,40 @@ def faq(): return app.send_static_file('faq.html')
 MAX_CONCURRENT_JOBS = 6
 sem_general = multiprocessing.Semaphore(4)
 sem_reserved = multiprocessing.Semaphore(2)
-GPU_OFFLOAD_THRESHOLD = 5
 
 def is_base58(s):
     if not s: return True
     return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', s))
 
+# --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
+def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
+    """Triggers the remote GPU Cloud Run Job."""
+    try:
+        client = run_v2.JobsClient()
+        request = run_v2.RunJobRequest(
+            name=GPU_JOB_NAME,
+            overrides={
+                "container_overrides": [{
+                    "env": [
+                        {"name": "TASK_JOB_ID", "value": job_id},
+                        {"name": "TASK_PREFIX", "value": prefix or ""},
+                        {"name": "TASK_SUFFIX", "value": suffix or ""},
+                        {"name": "TASK_CASE", "value": str(case_sensitive)},
+                        {"name": "TASK_PIN", "value": pin},
+                        {"name": "TASK_USER_ID", "value": user_id}
+                    ]
+                }]
+            }
+        )
+        operation = client.run_job(request=request)
+        print(f"🚀 Dispatched GPU Job: {job_id}")
+    except Exception as e:
+        print(f"❌ Failed to dispatch GPU job: {e}")
+        # Mark as failed in DB so user isn't stuck
+        db = firestore.Client(project=PROJECT_ID)
+        db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'GPU Dispatch Failed'})
+
+# --- LOCAL CPU LOGIC ---
 def check_key_batch(prefix, suffix, case_sensitive, batch_size):
     for i in range(batch_size):
         kp = Keypair()
@@ -102,7 +131,6 @@ def verify_payment(signature, required_price_sol):
         meta = result.get("meta", {})
         msg = result.get("transaction", {}).get("message", {})
         account_keys_raw = msg.get("accountKeys", [])
-        # Support both legacy (list of str) and v0 (list of dict)
         accounts = [k.get("pubkey") if isinstance(k, dict) else k for k in account_keys_raw]
 
         try:
@@ -135,7 +163,7 @@ def send_completion_email(to_email, job_id, public_key):
         msg['From'] = SMTP_EMAIL
         msg['To'] = to_email
         msg['Subject'] = "VanityForge Job Complete!"
-        body = f"<html><body><h2>Job Complete!</h2><p><strong>Public Key:</strong> {public_key}</p><p><a href='https://tomaaytakin.github.io'>Reveal Key</a></p></body></html>"
+        body = f"<html><body><h2>Job Complete!</h2><p><strong>Public Key:</strong> {public_key}</p><p><a href='https://vanityforge.org'>Reveal Key</a></p></body></html>"
         msg.attach(MIMEText(body, 'html'))
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
@@ -254,47 +282,50 @@ def submit_job():
         if not bcrypt.checkpw(pin.encode(), udoc.to_dict().get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
         
         is_admin = (email == ADMIN_EMAIL)
-        if not is_admin:
-            if len(list(db.collection('vanity_jobs').where('user_id', '==', user_id).where('status', 'in', ['QUEUED', 'RUNNING']).get())) > 0:
-                return jsonify({'error': 'One job at a time'}), 403
-            if (len(prefix or '') + len(suffix or '')) > 5: return jsonify({'error': 'Max 5 chars in Beta'}), 403
-
+        
+        # --- NEW HYBRID LOGIC ---
         total_len = len(prefix or '') + len(suffix or '')
-        prices = {0:0.25, 1:0.25, 2:0.25, 3:0.25, 4:0.25, 5:0.50, 6:1.00, 7:2.00, 8:3.00}
-        base = prices.get(total_len, 5.00)
+        
+        # Prices
+        if total_len <= 4: base = 0.25
+        elif total_len == 5: base = 0.50
+        elif total_len == 6: base = 1.00
+        elif total_len == 7: base = 2.00
+        elif total_len == 8: base = 3.00
+        else: base = 5.00
+        
         price = 0.0 if (total_len <= 4 and check_user_trials(user_id) < 2) or is_admin else base * 0.5
         
+        # Hard Limit for Beta (Prevent infinite cost)
+        if total_len > 8: return jsonify({'error': 'Max 8 chars allowed in Beta'}), 403
+
+        # Payment Check
         if price > 0:
             if not tx_sig: return jsonify({'error': f'Payment of {price} SOL required'}), 402
             if not verify_payment(tx_sig, price): return jsonify({'error': 'Payment verification failed'}), 402
 
         job_id = str(uuid.uuid4())
-        est = (0.5 * (58 ** total_len)) / 5000000
+        est_seconds = (0.5 * (58 ** total_len)) / 5000000
         
+        # Save Initial State
         db.collection('vanity_jobs').document(job_id).set({
             'job_id': job_id, 'user_id': user_id, 'prefix': prefix, 'suffix': suffix, 'case_sensitive': data.get('case_sensitive', True),
             'status': 'QUEUED', 'created_at': firestore.SERVER_TIMESTAMP, 'is_trial': (price == 0), 'price_sol': price,
             'transaction_signature': tx_sig, 'email': email, 'notify': notify
         })
         
-        if total_len >= GPU_OFFLOAD_THRESHOLD:
-            print(f"Dispatched Job {job_id} to GPU Service")
-            def dispatch_gpu():
-                try:
-                    payload = {
-                        'job_id': job_id,
-                        'prefix': prefix,
-                        'suffix': suffix,
-                        'case_sensitive': data.get('case_sensitive', True)
-                    }
-                    requests.post(GPU_SERVICE_URL, json=payload, timeout=5)
-                except Exception as e:
-                    print(f"Failed to dispatch job {job_id} to GPU service: {e}")
-
-            threading.Thread(target=dispatch_gpu).start()
+        # --- BRANCH: GPU vs CPU ---
+        if total_len >= 5:
+            # DISPATCH TO CLOUD RUN
+            print(f"⚡ Dispatching Job {job_id} (Len {total_len}) to Cloud Run GPU")
+            dispatch_cloud_job(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin)
+            # We return immediately, user sees "Queued" -> "Running" -> "Completed"
         else:
-            p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin, est < 900, email, notify))
+            # LOCAL CPU
+            is_quick = est_seconds < 900
+            p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin, is_quick, email, notify))
             p.start()
+
         return jsonify({'job_id': job_id, 'message': 'Accepted'}), 202
 
     except Exception as e: return jsonify({'error': str(e)}), 500
