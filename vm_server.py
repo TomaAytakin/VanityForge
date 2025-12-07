@@ -44,7 +44,7 @@ SMTP_PORT = 587
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
 
 # --- QUEUE LIMITS (TRAFFIC CONTROL) ---
-MAX_LOCAL_JOBS = 1   # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
+MAX_LOCAL_JOBS = 1    # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
 MAX_CLOUD_JOBS = 50  # Max concurrent "Hard" jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
@@ -254,6 +254,7 @@ def scheduler_loop():
                 else: running_local += 1
             
             # 2. Fetch QUEUED jobs (Oldest first = Fairness)
+            # THIS QUERY REQUIRES THE COMPOSITE INDEX: status=QUEUED, order_by=created_at
             queued_docs = db.collection('vanity_jobs').where('status', '==', 'QUEUED').order_by('created_at').limit(10).stream()
             
             for doc in queued_docs:
@@ -276,11 +277,12 @@ def scheduler_loop():
                         print(f"🚦 Dispatching Cloud Job: {job_id}")
                         db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
                         
-                        # Trigger Cloud Run
+                        # Cleanup temp PIN for security BEFORE dispatching
+                        db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
+                        
+                        # Trigger Cloud Run (AFTER security cleanup)
                         dispatch_cloud_job(job_id, data['user_id'], data['prefix'], data['suffix'], data['case_sensitive'], pin_plain)
                         
-                        # Cleanup temp PIN for security
-                        db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
                         running_cloud += 1
                 
                 else:
@@ -292,8 +294,7 @@ def scheduler_loop():
                         est_seconds = (0.5 * (58 ** (len(data.get('prefix') or '') + len(data.get('suffix') or '')))) / 5000000
                         is_quick = est_seconds < 900
                         
-                        # Start Local Process
-                        # NOTE: We rely on the dynamic TOTAL_GRINDING_CORES here.
+                        # Start Local Process (NOTE: pin_plain is passed securely to the worker)
                         p = multiprocessing.Process(target=background_grinder, args=(job_id, data['user_id'], data['prefix'], data['suffix'], data['case_sensitive'], pin_plain, is_quick, data.get('email'), data.get('notify')))
                         p.start()
                         
@@ -302,6 +303,7 @@ def scheduler_loop():
                         running_local += 1
 
         except Exception as e:
+            # The database index failure logs here.
             print(f"Scheduler Error: {e}")
         
         # Check queue every 5 seconds
@@ -406,12 +408,21 @@ def reveal_key():
         job = db.collection('vanity_jobs').document(job_id).get()
         if not job.exists: return jsonify({'error': 'Job not found'}), 404
         jdata = job.to_dict()
-        user_doc = db.collection('users').document(jdata['user_id']).get()
-        if user_doc.exists and not bcrypt.checkpw(pin.encode(), user_doc.to_dict().get('pin_hash').encode()):
-             return jsonify({'error': 'Invalid PIN'}), 401
+        
+        # --- CRITICAL SECURITY FIX ---
+        user_doc = db.collection('users').document(jdata['user_id']).get() 
+        pin_hash = user_doc.to_dict().get('pin_hash', '') if user_doc.exists else ''
+
+        # If the hash exists and the provided PIN does NOT match the hash, reject.
+        if pin_hash and not bcrypt.checkpw(pin.encode(), pin_hash.encode()):
+            return jsonify({'error': 'Invalid PIN'}), 401
+        
+        # PIN is correct for the job owner, proceed to decryption.
         key = generate_key_from_pin(pin, jdata['user_id'])
         return jsonify({'secret_key': Fernet(key).decrypt(jdata['secret_key'].encode()).decode()})
-    except Exception as e: return jsonify({'error': 'Decryption failed'}), 400
+    except Exception as e: 
+        print(f"Decryption Error: {e}")
+        return jsonify({'error': 'Decryption failed'}), 400
 
 if __name__ == '__main__':
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
