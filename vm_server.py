@@ -18,6 +18,7 @@ from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.cloud import firestore
+from google.cloud import run_v2
 from solders.keypair import Keypair
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -37,6 +38,7 @@ SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
+GPU_JOB_NAME = "projects/vanityforge/locations/europe-west1/jobs/vanity-gpu-worker"
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -77,6 +79,31 @@ def check_key_batch(prefix, suffix, case_sensitive, batch_size):
 
 def worker_batch_wrapper(args):
     return check_key_batch(*args)
+
+def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
+    try:
+        client = run_v2.JobsClient()
+        request = run_v2.RunJobRequest(
+            name=GPU_JOB_NAME,
+            overrides=run_v2.RunJobRequest.Overrides(
+                container_overrides=[
+                    run_v2.RunJobRequest.Overrides.ContainerOverride(
+                        env=[
+                            run_v2.EnvVar(name="TASK_JOB_ID", value=str(job_id)),
+                            run_v2.EnvVar(name="TASK_PREFIX", value=str(prefix) if prefix else ""),
+                            run_v2.EnvVar(name="TASK_SUFFIX", value=str(suffix) if suffix else ""),
+                            run_v2.EnvVar(name="TASK_CASE", value=str(case_sensitive)),
+                            run_v2.EnvVar(name="TASK_PIN", value=str(pin)),
+                            run_v2.EnvVar(name="TASK_USER_ID", value=str(user_id)),
+                        ]
+                    )
+                ]
+            )
+        )
+        operation = client.run_job(request=request)
+        print(f"Cloud Run Job dispatched for {job_id}: {operation.name}")
+    except Exception as e:
+        print(f"Failed to dispatch Cloud Run Job for {job_id}: {e}")
 
 def check_user_trials(user_id):
     try:
@@ -277,21 +304,8 @@ def submit_job():
             'transaction_signature': tx_sig, 'email': email, 'notify': notify
         })
         
-        if total_len >= GPU_OFFLOAD_THRESHOLD:
-            print(f"Dispatched Job {job_id} to GPU Service")
-            def dispatch_gpu():
-                try:
-                    payload = {
-                        'job_id': job_id,
-                        'prefix': prefix,
-                        'suffix': suffix,
-                        'case_sensitive': data.get('case_sensitive', True)
-                    }
-                    requests.post(GPU_SERVICE_URL, json=payload, timeout=5)
-                except Exception as e:
-                    print(f"Failed to dispatch job {job_id} to GPU service: {e}")
-
-            threading.Thread(target=dispatch_gpu).start()
+        if total_len >= 5:
+            dispatch_cloud_job(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin)
         else:
             p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin, est < 900, email, notify))
             p.start()
