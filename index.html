@@ -32,7 +32,6 @@
 </head>
 <body class="min-h-screen flex flex-col items-center px-4">
 
-    <!-- Navigation Bar -->
     <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
@@ -58,7 +57,6 @@
             </div>
         </div>
 
-        <!-- Mobile menu, show/hide based on menu state. -->
         <div class="hidden md:hidden" id="mobile-menu">
             <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
                 <a href="/" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">Forge</a>
@@ -69,12 +67,10 @@
         </div>
     </nav>
 
-    <!-- Banner -->
     <div class="w-full max-w-2xl mb-8 flex justify-center mt-10">
         <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
     </div>
 
-    <!-- Auth Section -->
     <div id="auth-section" class="w-full max-w-2xl glass-panel p-8 rounded-xl shadow-lg text-center transition-all duration-300">
         <h2 class="text-2xl font-bold mb-6 text-purple-400">Connect to VanityForge</h2>
         <div class="flex flex-col gap-4 max-w-xs mx-auto">
@@ -87,10 +83,8 @@
         </div>
     </div>
 
-    <!-- App Interface (Hidden initially) -->
     <div id="app-interface" class="w-full max-w-2xl hidden space-y-6 animate-fade-in-up">
 
-        <!-- Job Submission -->
         <div class="glass-panel p-8 rounded-xl shadow-lg relative overflow-hidden">
             <div class="absolute top-0 right-0 p-4 opacity-10">
                 <i class="fa-solid fa-code text-6xl text-purple-500"></i>
@@ -156,7 +150,6 @@
             <p id="submit-error" class="text-red-400 text-sm mt-3 text-center hidden bg-red-900/20 py-2 rounded border border-red-900/50"></p>
         </div>
 
-        <!-- Jobs List -->
         <div class="glass-panel p-8 rounded-xl shadow-lg">
             <h3 class="text-lg font-bold mb-4 text-gray-300 border-b border-gray-700 pb-2 flex items-center justify-between">
                 <span><i class="fa-solid fa-list-ul mr-2 text-purple-500"></i>Your Jobs</span>
@@ -168,14 +161,12 @@
         </div>
     </div>
 
-    <!-- Numpad Modal -->
     <div id="numpad-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm hidden transition-opacity duration-300">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform scale-95 transition-transform duration-300" id="numpad-content">
             <h3 id="numpad-title" class="text-center text-xl font-bold text-white mb-6">Enter Vault PIN</h3>
 
             <div class="flex justify-center gap-4 mb-8" id="pin-display">
-                <!-- Dots will be injected here -->
-            </div>
+                </div>
 
             <div class="grid grid-cols-3 gap-4">
                 <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(1)">1</button>
@@ -195,7 +186,6 @@
         </div>
     </div>
 
-    <!-- Beta Discount Modal -->
     <div id="beta-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm hidden transition-opacity duration-300">
         <div class="bg-gray-900 border border-purple-500 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform scale-95 transition-transform duration-300 text-center relative overflow-hidden" id="beta-modal-content">
             <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-pink-500"></div>
@@ -221,13 +211,11 @@
             appId: "1:124272129554:web:5e4f9e1d89bd54b3accacb",
             measurementId: "G-97FJY9VP2K"
         };
-
         // INIT FIREBASE
         if (!firebase.apps.length) {
             firebase.initializeApp(FIREBASE_CONFIG);
         }
         const db = firebase.firestore();
-
         // CHECK REDIRECT RESULT
         firebase.auth().getRedirectResult().then((result) => {
             if (result.user) {
@@ -240,7 +228,6 @@
             console.error("Redirect Login Error:", error);
             // Optional: alert(error.message);
         });
-
         // STATE
         var currentUser = null;
         var currentUserEmail = null;
@@ -249,22 +236,20 @@
 
         // AUDIO SYSTEM
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
         function playSound(type) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
-
             const oscillator = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
 
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
-
             if (type === 'input') {
                 // High pitch blip
-                oscillator.type = 'sine'; // or triangle
-                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+                oscillator.type = 'sine';
+                // or triangle
+                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+                // A5
                 oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
-
                 gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
 
@@ -348,7 +333,6 @@
                 return;
             }
             playSound('input'); // Confirm sound?
-
             if (numpadMode === 'create') {
                 await setPin(currentPin);
             } else if (numpadMode === 'submit') {
@@ -409,12 +393,12 @@
                 });
                 const data = await res.json();
                 userTrialsUsed = data.trials_used || 0;
-
                 if (data.has_pin) {
                     onLoginSuccess();
                 } else {
                     // Prompt to create PIN
-                    document.getElementById('auth-section').classList.add('hidden'); // Hide auth temporarily
+                    document.getElementById('auth-section').classList.add('hidden');
+                    // Hide auth temporarily
                     openNumpad('create', 'Create your Vault PIN', null);
                 }
             } catch (e) {
@@ -473,20 +457,17 @@
              setTimeout(() => {
                 document.getElementById('beta-modal-content').classList.replace('scale-95', 'scale-100');
             }, 10);
-
             // Simple fade in effect
             appInterface.style.opacity = 0;
             setTimeout(() => {
                 appInterface.style.transition = 'opacity 0.5s ease-in-out';
                 appInterface.style.opacity = 1;
             }, 50);
-
             let displayId = currentUser;
             if (currentUser === "DEV_USER") displayId = "Dev Mode";
             else if (currentUser.length > 10) displayId = currentUser.slice(0, 4) + '...' + currentUser.slice(-4);
 
             document.getElementById('user-id-display').innerText = displayId;
-
             // Default Check email notify if logged in via Google (and thus have email)
             if (currentUserEmail) {
                 document.getElementById('email-notify').checked = true;
@@ -500,7 +481,6 @@
             const p = document.getElementById('prefix').value || "";
             const s = document.getElementById('suffix').value || "";
             const totalLen = p.length + s.length;
-
             if (totalLen === 0) {
                 document.getElementById('calc-difficulty').innerText = "0 chars";
                 document.getElementById('calc-time').innerText = "Instant";
@@ -516,10 +496,8 @@
             else if (totalLen === 7) basePrice = 2.00;
             else if (totalLen === 8) basePrice = 3.00;
             else basePrice = 5.00;
-
             // Apply 50% Discount
             let finalPrice = basePrice * 0.5;
-
             // Check Trial
             let isTrial = false;
             if (totalLen <= 4 && userTrialsUsed < 2) {
@@ -529,7 +507,6 @@
 
             // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
             let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
-
             let timeStr;
             if (seconds < 1) timeStr = "Instant";
             else if (seconds < 60) timeStr = Math.ceil(seconds) + "s";
@@ -570,7 +547,6 @@
                 updateEstimates();
             });
         });
-
         // EMAIL NOTIFICATION LOGIC
         document.getElementById('email-notify').addEventListener('change', async function(e) {
             if (this.checked && !currentUserEmail) {
@@ -594,7 +570,6 @@
              const prefix = document.getElementById('prefix').value;
              const suffix = document.getElementById('suffix').value;
              const totalLen = prefix.length + suffix.length;
-
              if (!prefix && !suffix) {
                 const errorEl = document.getElementById('submit-error');
                 errorEl.innerText = "Please specify a prefix or suffix.";
@@ -602,7 +577,6 @@
                 return;
              }
              document.getElementById('submit-error').classList.add('hidden');
-
              // Check estimated time
              // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
              let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
@@ -610,7 +584,6 @@
                  let timeStr;
                  if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + " hours";
                  else timeStr = (seconds/86400).toFixed(1) + " days";
-
                  if (!confirm(`This job may take ${timeStr}. Do you accept the wait and proceed?`)) {
                      return;
                  }
@@ -626,17 +599,14 @@
             const notify = document.getElementById('email-notify').checked;
             const errorEl = document.getElementById('submit-error');
             const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
-
             // Disable button
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
 
             // God Mode Check
             const isGodMode = (currentUserEmail === "tomaaytakin@gmail.com");
-
             // Calculate Price & Check Payment
             const totalLen = prefix.length + suffix.length;
-
             // Fixed Pricing Logic
             let basePrice = 0;
             if (totalLen <= 4) basePrice = 0.25;
@@ -645,16 +615,12 @@
             else if (totalLen === 7) basePrice = 2.00;
             else if (totalLen === 8) basePrice = 3.00;
             else basePrice = 5.00;
-
             // Apply 50% Discount
             let cost = basePrice * 0.5;
-
             let isTrial = (totalLen <= 4 && userTrialsUsed < 2);
             let transactionSignature = null;
-
             // If trial, cost is 0
             if (isTrial) cost = 0;
-
             // God Mode Skips Payment
             if (!isGodMode && cost > 0) {
                  if (!window.solana || !window.solana.isConnected) {
@@ -688,14 +654,13 @@
                              lamports: Math.round(cost * solanaWeb3.LAMPORTS_PER_SOL)
                          })
                      );
-
                      transaction.feePayer = fromPubkey;
                      // Use the dedicated Helius endpoint
                      // The user will replace the placeholder with their actual URL
+                     // UPDATED WITH USER KEY
                      const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=b9a8642a-d184-417f-91ab-efc25ab66b99", "confirmed");
                      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
-
                      // 3. Sign and Send
                      const { signature } = await window.solana.signAndSendTransaction(transaction);
                      transactionSignature = signature;
@@ -728,7 +693,6 @@
                 email: currentUserEmail,
                 notify: notify
             };
-
             try {
                 const res = await fetch('/submit-job', {
                     method: 'POST',
@@ -759,7 +723,6 @@
         // POLLING & UI
         function pollJobStatus() {
             if (jobListenerUnsubscribe) jobListenerUnsubscribe();
-
             const container = document.getElementById('jobs-container');
 
             jobListenerUnsubscribe = db.collection('vanity_jobs')
@@ -803,12 +766,11 @@
                                     </div>
                                     <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
                                         <div id="key-text-${doc.id}" class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
-                                            <!-- Decrypted key will go here -->
-                                        </div>
+                                            </div>
                                         <button onclick="copyKey('${doc.id}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
                                     </div>
                                 </div>
-                             `;
+                            `;
                         } else if (status === 'FAILED') {
                             statusColor = 'text-red-400';
                             statusIcon = '<i class="fa-solid fa-times-circle"></i>';
@@ -858,7 +820,6 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ job_id: jobId, pin: pin })
                 });
-
                 const data = await res.json();
 
                 if (res.ok) {
@@ -892,7 +853,6 @@
 
         function copyToClipboard(text) {
             if (!text) return;
-
             // Visual Feedback Function
             const showFeedback = () => {
                 const activeEl = document.activeElement;
@@ -917,7 +877,6 @@
                     }
                 }
             };
-
             if (navigator.clipboard && window.isSecureContext) {
                 // Secure context (HTTPS)
                 navigator.clipboard.writeText(text).then(showFeedback).catch(err => {
@@ -939,7 +898,6 @@
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
-
             try {
                 const successful = document.execCommand('copy');
                 if (successful) {
