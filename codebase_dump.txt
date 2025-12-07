@@ -1,0 +1,1644 @@
+
+--- vm_server.py ---
+
+import os
+import uuid
+import logging
+import multiprocessing
+import base58
+import re
+import time
+import signal
+import base64
+import bcrypt
+import hashlib
+import math
+import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from google.cloud import firestore
+from solders.keypair import Keypair
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+# Configuration
+PROJECT_ID = 'vanityforge'
+SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
+TREASURY_PUBKEY = "2d8W2qgRi7BCMTuyv2ZHbf9zJi5C1hT4VRudRnxZifVD"
+ADMIN_EMAIL = "tomaaytakin@gmail.com"
+
+# Email Configuration Placeholders
+SMTP_SERVER = "smtp.gmail.com" # Placeholder
+SMTP_PORT = 587
+SMTP_EMAIL = "your_email@gmail.com" # Placeholder
+SMTP_PASSWORD = "your_password" # Placeholder
+
+# Serve static files from the current directory
+app = Flask(__name__, static_folder='.', static_url_path='')
+# Strict CORS: Allow requests from the specific frontend URL and custom domain
+CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
+
+@app.route('/')
+def index():
+    return app.send_static_file('index.html')
+
+@app.route('/roadmap')
+def roadmap():
+    return app.send_static_file('roadmap.html')
+
+@app.route('/faq')
+def faq():
+    return app.send_static_file('faq.html')
+
+# Global to track active jobs
+MAX_CONCURRENT_JOBS = 6
+# Reserve 2 core slots for "Quick Jobs" (estimated time < 15 minutes).
+# Logic:
+# Long jobs can only acquire from sem_general (size 4).
+# Quick jobs try sem_general first, if full, they use sem_reserved (size 2).
+sem_general = multiprocessing.Semaphore(4)
+sem_reserved = multiprocessing.Semaphore(2)
+
+def is_base58(s):
+    """Checks if the string contains only Base58 characters."""
+    if not s: return True
+    # Base58 alphabet: 1-9, A-H, J-N, P-Z, a-k, m-z
+    pattern = r'^[1-9A-HJ-NP-Za-km-z]+$'
+    return bool(re.match(pattern, s))
+
+def check_key_batch(prefix, suffix, case_sensitive, batch_size):
+    """
+    Checks a batch of keys.
+    Returns (public_key, secret_key, attempts_made)
+    """
+    for i in range(batch_size):
+        kp = Keypair()
+        pub = str(kp.pubkey())
+
+        # Prefix Check
+        if case_sensitive:
+            p_match = pub.startswith(prefix) if prefix else True
+        else:
+            p_match = pub.lower().startswith(prefix.lower()) if prefix else True
+
+        if not p_match:
+            continue
+
+        # Suffix Check
+        if case_sensitive:
+            s_match = pub.endswith(suffix) if suffix else True
+        else:
+            s_match = pub.lower().endswith(suffix.lower()) if suffix else True
+
+        if s_match:
+            # Found match
+            return (str(kp.pubkey()), base58.b58encode(bytes(kp)).decode('ascii'), i + 1)
+
+    return (None, None, batch_size)
+
+def worker_batch_wrapper(args):
+    """
+    Wrapper to unpack arguments and run check_key_batch.
+    """
+    prefix, suffix, case_sensitive, batch_size = args
+    return check_key_batch(prefix, suffix, case_sensitive, batch_size)
+
+def check_user_trials(user_id):
+    """
+    Checks how many trial jobs the user has used.
+    Returns the count of used trials.
+    """
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        # Retrieve all jobs for the user and count those marked as trials
+        # We fetch all jobs for the user to ensure accuracy without complex composite indexes
+        docs = db.collection('vanity_jobs').where('user_id', '==', user_id).stream()
+
+        trial_count = 0
+        for doc in docs:
+            data = doc.to_dict()
+            if data.get('is_trial'):
+                trial_count += 1
+        return trial_count
+    except Exception as e:
+        print(f"Error checking trials: {e}")
+        return 2 # Fail safe: assume no trials left if error
+
+def verify_payment(signature):
+    """Verifies that a transaction is successful on-chain."""
+    if not signature: return False
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [
+            signature,
+            {"encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0}
+        ]
+    }
+
+    try:
+        resp = requests.post(SOLANA_RPC_URL, json=payload, timeout=10)
+        data = resp.json()
+
+        if "error" in data:
+            print(f"RPC Error for {signature}: {data['error']}")
+            return False
+
+        result = data.get("result")
+        if not result:
+            return False
+
+        if result.get("meta", {}).get("err"):
+             return False # Transaction failed
+
+        # In a full implementation, we would parse 'transaction' -> 'message' -> 'accountKeys'
+        # and 'meta' -> 'postBalances' - 'preBalances' to verify amount transferred to TREASURY_PUBKEY.
+
+        return True
+    except Exception as e:
+        print(f"Verification Exception: {e}")
+        return False
+
+def get_deterministic_salt(user_id):
+    """Generates a deterministic salt based on the user_id."""
+    return hashlib.sha256(user_id.encode()).digest()
+
+def generate_key_from_pin(pin, user_id):
+    """
+    Generates a Fernet key from the user's PIN using a deterministic salt based on user_id.
+    """
+    salt = get_deterministic_salt(user_id)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
+
+def send_completion_email(to_email, job_id, public_key):
+    """Sends an email notification upon job completion."""
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = "VanityForge Job Complete!"
+
+        body = f"""
+        <html>
+          <body>
+            <h2>Your VanityForge Job is Complete!</h2>
+            <p><strong>Public Key:</strong> {public_key}</p>
+            <p>Your private key has been securely generated and encrypted.</p>
+            <p><a href="https://tomaaytakin.github.io">Log in to VanityForge</a> to reveal your private key.</p>
+            <br>
+            <p><em>Job ID: {job_id}</em></p>
+          </body>
+        </html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
+        server.quit()
+        print(f"Email sent to {to_email}")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
+def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick, email=None, notify=False):
+    """
+    Background process that manages the Pool of workers.
+    """
+    # CPU Affinity: Limit to cpu_count - 1 to keep one core free
+    pool_size = max(1, multiprocessing.cpu_count() - 1)
+    acquired_general = False
+    acquired_reserved = False
+    try:
+        # Concurrency Logic: Wait for a slot
+        if is_quick:
+            # Try general slot first (non-blocking)
+            if sem_general.acquire(block=False):
+                acquired_general = True
+            else:
+                # If general full, block on reserved slot
+                sem_reserved.acquire() # Blocking
+                acquired_reserved = True
+        else:
+            # Long jobs must wait for general slot
+            sem_general.acquire() # Blocking
+            acquired_general = True
+
+        # Initialize Firestore inside the process
+        db = firestore.Client(project=PROJECT_ID)
+
+        # Checkpointing Initialization
+        checkpoint_ref = db.collection('job_checkpoints').document(job_id)
+        doc = checkpoint_ref.get()
+        total_attempts = 0
+        if doc.exists:
+            total_attempts = doc.to_dict().get('last_attempt_number', 0)
+            # Resuming logic: We just continue counting from here.
+
+        last_checkpoint_save = total_attempts
+
+        # Update status to RUNNING
+        db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+
+        # Initialize Pool with limit
+        BATCH_SIZE = 50000 # Process keys in chunks
+
+        with multiprocessing.Pool(processes=pool_size) as pool:
+            pending_results = []
+
+            # Helper to add tasks
+            def add_task():
+                return pool.apply_async(worker_batch_wrapper, args=((prefix, suffix, case_sensitive, BATCH_SIZE),))
+
+            # Initial fill
+            for _ in range(pool_size * 2):
+                pending_results.append(add_task())
+
+            found_key = None
+
+            while not found_key:
+                next_pending = []
+                results_processed = 0
+
+                for res in pending_results:
+                    if res.ready():
+                        results_processed += 1
+                        try:
+                            pub, raw_sec, count = res.get()
+                            total_attempts += count
+
+                            if pub:
+                                found_key = (pub, raw_sec)
+                                break
+                        except Exception as e:
+                            print(f"Worker error: {e}")
+                    else:
+                        next_pending.append(res)
+
+                if found_key:
+                    break
+
+                # Refill pool to keep it saturated
+                for _ in range(results_processed):
+                    next_pending.append(add_task())
+
+                pending_results = next_pending
+
+                # Progress Save: Every 10 million attempts
+                if total_attempts - last_checkpoint_save >= 10000000:
+                    checkpoint_ref.set({'last_attempt_number': total_attempts})
+                    last_checkpoint_save = total_attempts
+
+                time.sleep(0.05) # Prevent busy loop
+
+            # Cleanup
+            pool.terminate()
+            pool.join()
+
+            public_key, raw_secret_key = found_key
+
+            # Encrypt the private key
+            # Use deterministic salt based on user_id + PIN
+            key = generate_key_from_pin(pin, user_id)
+            f = Fernet(key)
+            encrypted_secret_key = f.encrypt(raw_secret_key.encode()).decode()
+
+            # Save to Firestore
+            db.collection('vanity_jobs').document(job_id).update({
+                'status': 'COMPLETED',
+                'public_key': public_key,
+                'secret_key': encrypted_secret_key,
+                'completed_at': firestore.SERVER_TIMESTAMP
+            })
+            print(f"SECRET KEY SAVED for {job_id}")
+
+            # Send Email Notification
+            if notify and email:
+                send_completion_email(email, job_id, public_key)
+
+            # Final Step: Delete checkpoint
+            checkpoint_ref.delete()
+
+    except Exception as e:
+        print(f"Error in background grinder: {e}")
+        try:
+             db = firestore.Client(project=PROJECT_ID)
+             db.collection('vanity_jobs').document(job_id).update({
+                'status': 'FAILED',
+                'error': str(e)
+            })
+        except:
+            pass
+    finally:
+        # Release semaphore
+        if acquired_general:
+            sem_general.release()
+        if acquired_reserved:
+            sem_reserved.release()
+
+@app.route('/check-user', methods=['POST'])
+def check_user():
+    data = request.get_json(silent=True) or {}
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Missing user_id'}), 400
+
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        doc = db.collection('users').document(user_id).get()
+
+        trials_used = check_user_trials(user_id)
+
+        has_pin = False
+        if doc.exists and doc.to_dict().get('pin_hash'):
+            has_pin = True
+
+        return jsonify({'has_pin': has_pin, 'trials_used': trials_used})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/set-pin', methods=['POST'])
+def set_pin():
+    data = request.get_json(silent=True) or {}
+    user_id = data.get('user_id')
+    pin = data.get('pin')
+
+    if not user_id or not pin:
+        return jsonify({'error': 'Missing user_id or pin'}), 400
+
+    # Hash the PIN
+    # bcrypt automatically handles salt
+    hashed = bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
+
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        db.collection('users').document(user_id).set({
+            'user_id': user_id,
+            'pin_hash': hashed,
+            'updated_at': firestore.SERVER_TIMESTAMP
+        }, merge=True)
+        return jsonify({'message': 'PIN set successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/submit-job', methods=['POST'])
+def submit_job():
+    data = request.get_json(silent=True) or {}
+    user_id = data.get('userId') or data.get('user_id')
+    prefix = data.get('prefix')
+    suffix = data.get('suffix', '')
+    case_sensitive = data.get('case_sensitive', True)
+    pin = data.get('pin')
+    transaction_signature = data.get('transaction_signature')
+    email = data.get('email')
+    notify = data.get('notify', False)
+
+    is_admin = (email == ADMIN_EMAIL)
+
+    # Input Validation
+    if not user_id:
+        return jsonify({'error': 'Missing user_id'}), 400
+    if not prefix and not suffix:
+        return jsonify({'error': 'Prefix or suffix required'}), 400
+    if not pin:
+        return jsonify({'error': 'PIN is mandatory'}), 400
+
+    if (prefix and not is_base58(prefix)) or (suffix and not is_base58(suffix)):
+        return jsonify({'error': 'Invalid characters. Base58 characters only.'}), 400
+
+    # Verify PIN first
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        user_doc = db.collection('users').document(user_id).get()
+        if not user_doc.exists:
+             return jsonify({'error': 'User not found. Please refresh.'}), 400
+
+        stored_hash = user_doc.to_dict().get('pin_hash')
+        if not stored_hash:
+             return jsonify({'error': 'PIN not set. Please set a PIN.'}), 400
+
+        if not bcrypt.checkpw(pin.encode(), stored_hash.encode()):
+             return jsonify({'error': 'Invalid PIN.'}), 401
+
+        # Check User Limit: Return 403 if user has QUEUED or RUNNING job
+        if not is_admin:
+            active_jobs = db.collection('vanity_jobs').where('user_id', '==', user_id).where('status', 'in', ['QUEUED', 'RUNNING']).get()
+            if len(list(active_jobs)) > 0:
+                return jsonify({'error': 'You can only run one job at a time.'}), 403
+
+    except Exception as e:
+         return jsonify({'error': str(e)}), 500
+
+    # Calculate Price and Check Trials
+    total_len = len(prefix or '') + len(suffix or '')
+
+    # Hard Limit Enforcement (Beta) - Bypassed for Admin
+    if total_len > 5 and email != ADMIN_EMAIL:
+        return jsonify({'error': 'Maximum 5 characters allowed in Beta.'}), 403
+
+    # Fixed Pricing Logic (Pre-Discount)
+    if total_len <= 4:
+        base_price = 0.25
+    elif total_len == 5:
+        base_price = 0.50
+    elif total_len == 6:
+        base_price = 1.00
+    elif total_len == 7:
+        base_price = 2.00
+    elif total_len == 8:
+        base_price = 3.00
+    else:
+        base_price = 5.00
+
+    # Apply 50% Beta Discount
+    price_sol = base_price * 0.5
+
+    # Check Trials
+    trials_used = check_user_trials(user_id)
+    is_trial = False
+
+    if total_len <= 4 and trials_used < 2:
+        is_trial = True
+        price_sol = 0.0
+
+    if is_admin:
+        price_sol = 0.0
+        is_trial = True # Treat as free
+
+    # Trial Enforcement: Reject if cost is 0 but trials used up (Safety check) - Bypassed for Admin
+    if not is_admin and price_sol == 0 and trials_used >= 2:
+         return jsonify({'error': 'Trial limit reached. Please pay to continue.'}), 403
+
+    # Payment Verification - Bypassed for Admin
+    if not is_admin and price_sol > 0:
+        if not transaction_signature:
+             return jsonify({'error': f'Payment of {price_sol:.4f} SOL required.'}), 402
+
+        if not verify_payment(transaction_signature):
+             return jsonify({'error': 'Payment verification failed. Transaction invalid or not confirmed.'}), 402
+
+    # Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
+    est_seconds = (0.5 * (58 ** total_len)) / 5000000
+    is_quick = est_seconds < 900 # 15 minutes
+
+    job_id = str(uuid.uuid4())
+
+    # Initial DB Record
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        db.collection('vanity_jobs').document(job_id).set({
+            'job_id': job_id,
+            'user_id': user_id,
+            'prefix': prefix,
+            'suffix': suffix,
+            'case_sensitive': case_sensitive,
+            'status': 'QUEUED',
+            'created_at': firestore.SERVER_TIMESTAMP,
+            'is_trial': is_trial,
+            'price_sol': price_sol,
+            'transaction_signature': transaction_signature,
+            'email': email,
+            'notify': notify
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    # Spawn Background Process
+    p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick, email, notify))
+    p.start()
+
+    return jsonify({'job_id': job_id, 'message': 'Job accepted', 'is_trial': is_trial, 'price_sol': price_sol}), 202
+
+@app.route('/reveal-key', methods=['POST'])
+def reveal_key():
+    data = request.get_json(silent=True) or {}
+    job_id = data.get('job_id')
+    pin = data.get('pin')
+
+    if not job_id or not pin:
+        return jsonify({'error': 'Missing job_id or pin'}), 400
+
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        job_doc = db.collection('vanity_jobs').document(job_id).get()
+        if not job_doc.exists:
+             return jsonify({'error': 'Job not found'}), 404
+
+        job_data = job_doc.to_dict()
+        user_id = job_data.get('user_id')
+        encrypted_secret_key = job_data.get('secret_key')
+
+        if not encrypted_secret_key:
+            return jsonify({'error': 'Job not completed or key not found'}), 400
+
+        # Verify PIN against User DB to ensure it's the correct user
+        user_doc = db.collection('users').document(user_id).get()
+        if user_doc.exists:
+             stored_hash = user_doc.to_dict().get('pin_hash')
+             if stored_hash and not bcrypt.checkpw(pin.encode(), stored_hash.encode()):
+                 return jsonify({'error': 'Invalid PIN'}), 401
+
+        # Derive Key and Decrypt
+        key = generate_key_from_pin(pin, user_id)
+        f = Fernet(key)
+
+        try:
+            raw_secret_key = f.decrypt(encrypted_secret_key.encode()).decode()
+            return jsonify({'secret_key': raw_secret_key})
+        except Exception:
+            return jsonify({'error': 'Decryption failed. Did you change your PIN?'}), 400
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    # Reap zombie processes automatically
+    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+
+    pool_size = max(1, multiprocessing.cpu_count() - 1)
+    print(f"Detected {multiprocessing.cpu_count()} cores. Starting {pool_size} grinder processes.")
+
+    # Bind to 127.0.0.1 (localhost) on port 8080 as requested for Caddy reverse proxy
+    # This ensures ONLY Caddy can talk to the app, blocking direct external access.
+    app.run(host='127.0.0.1', port=8080)
+
+--- index.html ---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <title>VanityForge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 80px; }
+        .glass-panel { background: rgba(40, 40, 40, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+        .numpad-btn {
+            @apply bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl;
+        }
+        .pin-dot {
+            width: 12px; height: 12px; border-radius: 50%; background-color: #4b5563; transition: all 0.2s;
+        }
+        .pin-dot.active {
+            background-color: #9333ea; box-shadow: 0 0 8px #9333ea;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center px-4">
+
+    <!-- Navigation Bar -->
+    <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <span class="text-purple-500 font-bold text-xl tracking-wider uppercase"><i class="fa-solid fa-fire-flame-curved"></i> VanityForge</span>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="ml-10 flex items-baseline space-x-4">
+                            <a href="/" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
+                            <a href="/roadmap" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
+                            <a href="/faq" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
+                            <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="-mr-2 flex md:hidden">
+                    <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white">
+                        <span class="sr-only">Open main menu</span>
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile menu, show/hide based on menu state. -->
+        <div class="hidden md:hidden" id="mobile-menu">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                <a href="/" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">Forge</a>
+                <a href="/roadmap" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
+                <a href="/faq" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
+                <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Banner -->
+    <div class="w-full max-w-2xl mb-8 flex justify-center mt-10">
+        <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
+    </div>
+
+    <!-- Auth Section -->
+    <div id="auth-section" class="w-full max-w-2xl glass-panel p-8 rounded-xl shadow-lg text-center transition-all duration-300">
+        <h2 class="text-2xl font-bold mb-6 text-purple-400">Connect to VanityForge</h2>
+        <div class="flex flex-col gap-4 max-w-xs mx-auto">
+            <button onclick="loginWithGoogle()" class="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+                <i class="fa-brands fa-google"></i> Login with Google
+            </button>
+            <button id="connect-phantom-btn" onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+                <i class="fa-solid fa-wallet"></i> Connect Phantom
+            </button>
+        </div>
+    </div>
+
+    <!-- App Interface (Hidden initially) -->
+    <div id="app-interface" class="w-full max-w-2xl hidden space-y-6 animate-fade-in-up">
+
+        <!-- Job Submission -->
+        <div class="glass-panel p-8 rounded-xl shadow-lg relative overflow-hidden">
+            <div class="absolute top-0 right-0 p-4 opacity-10">
+                <i class="fa-solid fa-code text-6xl text-purple-500"></i>
+            </div>
+            <h2 class="text-xl font-bold mb-4 text-purple-400 flex items-center gap-2">
+                <i class="fa-solid fa-plus-circle"></i> Request New Vanity Address
+            </h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Prefix (Starts with)</label>
+                    <input type="text" id="prefix" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. CAFE">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Suffix (Ends with)</label>
+                    <input type="text" id="suffix" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. 888">
+                </div>
+            </div>
+
+            <p class="text-xs text-gray-500 mb-4">Note: Characters 0, O, I, and l are not allowed by Solana for security reasons.</p>
+
+            <div class="flex items-center gap-2 mb-4">
+                <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                    <input type="checkbox" name="toggle" id="case-sensitive" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                    <label for="case-sensitive" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
+                </div>
+                <label for="case-sensitive" class="text-sm text-gray-300 cursor-pointer select-none">Case Sensitive</label>
+
+                <div class="ml-auto flex items-center gap-2">
+                     <input type="checkbox" id="email-notify" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
+                     <label for="email-notify" class="text-sm text-gray-300 cursor-pointer select-none">Email me when done</label>
+                </div>
+
+                <style>
+                    .toggle-checkbox:checked { right: 0; border-color: #9333ea; }
+                    .toggle-checkbox:checked + .toggle-label { background-color: #9333ea; }
+                    .toggle-checkbox { right: 0; border-color: #4b5563; transition: all 0.3s; top: 0; left: 0;}
+                    .toggle-checkbox:checked { left: 50%; }
+                    .toggle-label { width: 100%; }
+                    .toggle-checkbox { position: absolute; top:0; left: 0; right: auto; bottom: auto; }
+                    .toggle-checkbox:checked { left: 1.25rem; border-color: #a855f7; }
+                </style>
+            </div>
+
+            <div class="bg-gray-800/50 rounded-lg p-4 mb-6 text-sm border border-gray-700">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-gray-400">Difficulty:</span>
+                    <span id="calc-difficulty" class="text-white font-bold">0 chars</span>
+                </div>
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-gray-400">Est. Time:</span>
+                    <span id="calc-time" class="text-white font-mono">Instant</span>
+                </div>
+                <div class="flex justify-between items-center pt-2 border-t border-gray-700">
+                    <span class="text-gray-400">Cost:</span>
+                    <span id="calc-cost" class="text-green-400 font-bold font-mono">0 Credits</span>
+                </div>
+            </div>
+
+            <button onclick="startSubmissionFlow()" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 rounded-lg shadow-lg transition transform hover:scale-[1.01] active:scale-[0.99] flex justify-center items-center gap-2">
+                <i class="fa-solid fa-rocket"></i> Forge
+            </button>
+            <p id="submit-error" class="text-red-400 text-sm mt-3 text-center hidden bg-red-900/20 py-2 rounded border border-red-900/50"></p>
+        </div>
+
+        <!-- Jobs List -->
+        <div class="glass-panel p-8 rounded-xl shadow-lg">
+            <h3 class="text-lg font-bold mb-4 text-gray-300 border-b border-gray-700 pb-2 flex items-center justify-between">
+                <span><i class="fa-solid fa-list-ul mr-2 text-purple-500"></i>Your Jobs</span>
+                <span class="text-xs font-normal text-gray-500" id="user-id-display"></span>
+            </h3>
+            <div id="jobs-container" class="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                <p class="text-center text-gray-500 italic py-8">No active jobs found.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Numpad Modal -->
+    <div id="numpad-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm hidden transition-opacity duration-300">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform scale-95 transition-transform duration-300" id="numpad-content">
+            <h3 id="numpad-title" class="text-center text-xl font-bold text-white mb-6">Enter Vault PIN</h3>
+
+            <div class="flex justify-center gap-4 mb-8" id="pin-display">
+                <!-- Dots will be injected here -->
+            </div>
+
+            <div class="grid grid-cols-3 gap-4">
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(1)">1</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(2)">2</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(3)">3</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(4)">4</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(5)">5</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(6)">6</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(7)">7</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(8)">8</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(9)">9</button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-red-400 font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadClear()"><i class="fa-solid fa-delete-left"></i></button>
+                <button class="numpad-btn bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadInput(0)">0</button>
+                <button class="numpad-btn bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 rounded-lg shadow transition transform active:scale-95 text-xl" onclick="numpadSubmit()"><i class="fa-solid fa-check"></i></button>
+            </div>
+            <button onclick="closeNumpad()" class="mt-6 w-full text-gray-500 hover:text-white text-sm">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Beta Discount Modal -->
+    <div id="beta-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm hidden transition-opacity duration-300">
+        <div class="bg-gray-900 border border-purple-500 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform scale-95 transition-transform duration-300 text-center relative overflow-hidden" id="beta-modal-content">
+            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-pink-500"></div>
+            <i class="fa-solid fa-tags text-4xl text-purple-400 mb-4 animate-bounce"></i>
+            <h3 class="text-2xl font-bold text-white mb-2">Beta Access Unlocked!</h3>
+            <p class="text-gray-300 mb-6">You've received a <span class="text-purple-400 font-bold">50% Discount</span> on all vanity address generations during our Beta phase.</p>
+            <button onclick="closeBetaModal()" class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-2 px-6 rounded-lg shadow-lg transition transform hover:scale-105">
+                Let's Forge!
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // CONFIGURATION (HARDCODED)
+        const TREASURY_WALLET_ADDRESS = "CUfjsGUee8u83dfFxHt1jXJUCRLiF1KoWVYcKyVforGe";
+        const API_URL = "/submit-job"; // Relative path
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyCSYhscdfpQD19GMsm3qIJw9AWC5OYjqMY",
+            authDomain: "vanityforge.firebaseapp.com",
+            projectId: "vanityforge",
+            storageBucket: "vanityforge.firebasestorage.app",
+            messagingSenderId: "124272129554",
+            appId: "1:124272129554:web:5e4f9e1d89bd54b3accacb",
+            measurementId: "G-97FJY9VP2K"
+        };
+
+        // INIT FIREBASE
+        if (!firebase.apps.length) {
+            firebase.initializeApp(FIREBASE_CONFIG);
+        }
+        const db = firebase.firestore();
+
+        // CHECK REDIRECT RESULT
+        firebase.auth().getRedirectResult().then((result) => {
+            if (result.user) {
+                const user = result.user;
+                currentUser = user.uid;
+                currentUserEmail = user.email;
+                checkUserStatus(currentUser);
+            }
+        }).catch((error) => {
+            console.error("Redirect Login Error:", error);
+            // Optional: alert(error.message);
+        });
+
+        // STATE
+        var currentUser = null;
+        var currentUserEmail = null;
+        var jobListenerUnsubscribe = null;
+        var userTrialsUsed = 0;
+
+        // AUDIO SYSTEM
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'input') {
+                // High pitch blip
+                oscillator.type = 'sine'; // or triangle
+                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+                oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'delete') {
+                // Low pitch whoosh/buzz
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+                oscillator.frequency.linearRampToValueAtTime(50, audioCtx.currentTime + 0.2);
+
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.2);
+            }
+        }
+
+        // NUMPAD LOGIC
+        let currentPin = "";
+        let numpadMode = ""; // 'create', 'submit', 'reveal'
+        let numpadCallback = null;
+        let revealJobId = null;
+
+        function openNumpad(mode, title, callback, jobId = null) {
+            currentPin = "";
+            numpadMode = mode;
+            numpadCallback = callback;
+            revealJobId = jobId;
+
+            document.getElementById('numpad-title').innerText = title;
+            updatePinDisplay();
+
+            const modal = document.getElementById('numpad-modal');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('numpad-content').classList.replace('scale-95', 'scale-100');
+            }, 10);
+        }
+
+        function closeNumpad() {
+            const modal = document.getElementById('numpad-modal');
+            document.getElementById('numpad-content').classList.replace('scale-100', 'scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+            currentPin = "";
+        }
+
+        function numpadInput(num) {
+            if (currentPin.length < 6) {
+                currentPin += num;
+                playSound('input');
+                updatePinDisplay();
+            }
+        }
+
+        function numpadClear() {
+            if (currentPin.length > 0) {
+                currentPin = currentPin.slice(0, -1);
+                playSound('delete');
+                updatePinDisplay();
+            }
+        }
+
+        function updatePinDisplay() {
+            const container = document.getElementById('pin-display');
+            container.innerHTML = '';
+            // Always show 6 slots
+            for (let i = 0; i < 6; i++) {
+                const dot = document.createElement('div');
+                dot.className = `pin-dot ${i < currentPin.length ? 'active' : ''}`;
+                container.appendChild(dot);
+            }
+        }
+
+        async function numpadSubmit() {
+            if (currentPin.length < 4) {
+                alert("PIN must be at least 4 digits.");
+                return;
+            }
+            playSound('input'); // Confirm sound?
+
+            if (numpadMode === 'create') {
+                await setPin(currentPin);
+            } else if (numpadMode === 'submit') {
+                numpadCallback(currentPin);
+            } else if (numpadMode === 'reveal') {
+                numpadCallback(revealJobId, currentPin);
+            }
+
+            closeNumpad();
+        }
+
+        // AUTHENTICATION
+        async function loginWithGoogle() {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            try {
+                const result = await firebase.auth().signInWithPopup(provider);
+                const user = result.user;
+                currentUser = user.uid;
+                currentUserEmail = user.email;
+                await checkUserStatus(currentUser);
+            } catch (error) {
+                console.error("Popup error:", error);
+                if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+                    console.warn("Popup blocked or closed, falling back to redirect...");
+                    try {
+                        await firebase.auth().signInWithRedirect(provider);
+                    } catch (redirectError) {
+                        console.error("Redirect error:", redirectError);
+                        alert("Login failed: " + redirectError.message);
+                    }
+                } else {
+                    alert("Google Login Failed: " + error.message);
+                }
+            }
+        }
+
+        async function connectWallet() {
+            if (window.solana && window.solana.isPhantom) {
+                try {
+                    const resp = await window.solana.connect();
+                    currentUser = resp.publicKey.toString();
+                    await checkUserStatus(currentUser);
+                } catch (err) {
+                    console.error(err);
+                    alert("Connection failed.");
+                }
+            } else {
+                window.open("https://phantom.app/", "_blank");
+            }
+        }
+
+        async function checkUserStatus(userId) {
+            try {
+                const res = await fetch('/check-user', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: userId })
+                });
+                const data = await res.json();
+                userTrialsUsed = data.trials_used || 0;
+
+                if (data.has_pin) {
+                    onLoginSuccess();
+                } else {
+                    // Prompt to create PIN
+                    document.getElementById('auth-section').classList.add('hidden'); // Hide auth temporarily
+                    openNumpad('create', 'Create your Vault PIN', null);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Error checking user status.");
+            }
+        }
+
+        async function setPin(pin) {
+            try {
+                const res = await fetch('/set-pin', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: currentUser, pin: pin })
+                });
+                if (res.ok) {
+                    onLoginSuccess();
+                } else {
+                    alert("Failed to set PIN.");
+                    location.reload();
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Error setting PIN.");
+            }
+        }
+
+        function closeBetaModal() {
+            const modal = document.getElementById('beta-modal');
+            document.getElementById('beta-modal-content').classList.replace('scale-100', 'scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+
+        function onLoginSuccess(isDev = false) {
+            document.getElementById('auth-section').classList.add('hidden');
+            const appInterface = document.getElementById('app-interface');
+            appInterface.classList.remove('hidden');
+
+            // God Mode Check
+            if (currentUserEmail === "tomaaytakin@gmail.com") {
+                const titleSpan = document.querySelector('nav .text-purple-500');
+                if (titleSpan) {
+                    titleSpan.innerHTML = '<i class="fa-solid fa-fire-flame-curved"></i> Welcome Dev 🛠️';
+                }
+                const godModeBadge = document.createElement('span');
+                godModeBadge.className = "ml-4 bg-yellow-500/20 text-yellow-400 text-xs font-bold px-2 py-1 rounded border border-yellow-500/50 animate-pulse";
+                godModeBadge.innerText = "God Mode Active";
+                titleSpan.appendChild(godModeBadge);
+            }
+
+            // Show Beta Modal
+            const betaModal = document.getElementById('beta-modal');
+            betaModal.classList.remove('hidden');
+             setTimeout(() => {
+                document.getElementById('beta-modal-content').classList.replace('scale-95', 'scale-100');
+            }, 10);
+
+            // Simple fade in effect
+            appInterface.style.opacity = 0;
+            setTimeout(() => {
+                appInterface.style.transition = 'opacity 0.5s ease-in-out';
+                appInterface.style.opacity = 1;
+            }, 50);
+
+            let displayId = currentUser;
+            if (currentUser === "DEV_USER") displayId = "Dev Mode";
+            else if (currentUser.length > 10) displayId = currentUser.slice(0, 4) + '...' + currentUser.slice(-4);
+
+            document.getElementById('user-id-display').innerText = displayId;
+
+            // Default Check email notify if logged in via Google (and thus have email)
+            if (currentUserEmail) {
+                document.getElementById('email-notify').checked = true;
+            }
+
+            pollJobStatus();
+        }
+
+        // CALCULATIONS (Helpers)
+        function updateEstimates() {
+            const p = document.getElementById('prefix').value || "";
+            const s = document.getElementById('suffix').value || "";
+            const totalLen = p.length + s.length;
+
+            if (totalLen === 0) {
+                document.getElementById('calc-difficulty').innerText = "0 chars";
+                document.getElementById('calc-time').innerText = "Instant";
+                document.getElementById('calc-cost').innerText = "0 SOL";
+                return;
+            }
+
+            // Fixed Pricing Logic
+            let basePrice = 0;
+            if (totalLen <= 4) basePrice = 0.25;
+            else if (totalLen === 5) basePrice = 0.50;
+            else if (totalLen === 6) basePrice = 1.00;
+            else if (totalLen === 7) basePrice = 2.00;
+            else if (totalLen === 8) basePrice = 3.00;
+            else basePrice = 5.00;
+
+            // Apply 50% Discount
+            let finalPrice = basePrice * 0.5;
+
+            // Check Trial
+            let isTrial = false;
+            if (totalLen <= 4 && userTrialsUsed < 2) {
+                isTrial = true;
+                finalPrice = 0;
+            }
+
+            // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
+            let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
+
+            let timeStr;
+            if (seconds < 1) timeStr = "Instant";
+            else if (seconds < 60) timeStr = Math.ceil(seconds) + "s";
+            else if (seconds < 3600) timeStr = Math.ceil(seconds/60) + "m";
+            else if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + "h";
+            else timeStr = (seconds/86400).toFixed(1) + "d";
+
+            document.getElementById('calc-difficulty').innerText = totalLen + " chars";
+            document.getElementById('calc-time').innerText = timeStr;
+
+            const costEl = document.getElementById('calc-cost');
+            if (isTrial) {
+                 // Trial UI: <del>0.25 SOL</del> FREE (Trial)
+                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-green-400">FREE (Trial)</span>`;
+            } else {
+                 // Discount UI: <del>1.0 SOL</del> 0.5 SOL
+                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-purple-400">${finalPrice.toFixed(2)} SOL</span>`;
+            }
+
+            // Hard Limit Warning
+            if (totalLen > 5 && currentUserEmail !== "tomaaytakin@gmail.com") {
+                document.getElementById('submit-error').innerText = "Maximum 5 characters allowed in Beta.";
+                document.getElementById('submit-error').classList.remove('hidden');
+                document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = true;
+                document.querySelector('button[onclick="startSubmissionFlow()"]').classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                document.getElementById('submit-error').classList.add('hidden');
+                document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = false;
+                document.querySelector('button[onclick="startSubmissionFlow()"]').classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        ['prefix', 'suffix'].forEach(id => {
+            document.getElementById(id).addEventListener('input', (e) => {
+                const val = e.target.value;
+                const clean = val.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+                if (val !== clean) e.target.value = clean;
+                updateEstimates();
+            });
+        });
+
+        // EMAIL NOTIFICATION LOGIC
+        document.getElementById('email-notify').addEventListener('change', async function(e) {
+            if (this.checked && !currentUserEmail) {
+                const provider = new firebase.auth.GoogleAuthProvider();
+                try {
+                    const result = await firebase.auth().signInWithPopup(provider);
+                    const user = result.user;
+                    currentUser = user.uid;
+                    currentUserEmail = user.email;
+                    await checkUserStatus(currentUser);
+                } catch (error) {
+                    console.error("Email login failed:", error);
+                    this.checked = false;
+                    alert("Email is required for notifications.");
+                }
+            }
+        });
+
+        // JOB SUBMISSION
+        function startSubmissionFlow() {
+             const prefix = document.getElementById('prefix').value;
+             const suffix = document.getElementById('suffix').value;
+             const totalLen = prefix.length + suffix.length;
+
+             if (!prefix && !suffix) {
+                const errorEl = document.getElementById('submit-error');
+                errorEl.innerText = "Please specify a prefix or suffix.";
+                errorEl.classList.remove('hidden');
+                return;
+             }
+             document.getElementById('submit-error').classList.add('hidden');
+
+             // Check estimated time
+             // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
+             let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
+             if (seconds > 3600) {
+                 let timeStr;
+                 if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + " hours";
+                 else timeStr = (seconds/86400).toFixed(1) + " days";
+
+                 if (!confirm(`This job may take ${timeStr}. Do you accept the wait and proceed?`)) {
+                     return;
+                 }
+             }
+
+             openNumpad('submit', 'Enter PIN to Forge', submitJob);
+        }
+
+        async function submitJob(pin) {
+            const prefix = document.getElementById('prefix').value;
+            const suffix = document.getElementById('suffix').value;
+            const caseSensitive = document.getElementById('case-sensitive').checked;
+            const notify = document.getElementById('email-notify').checked;
+            const errorEl = document.getElementById('submit-error');
+            const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
+
+            // Disable button
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+
+            // God Mode Check
+            const isGodMode = (currentUserEmail === "tomaaytakin@gmail.com");
+
+            // Calculate Price & Check Payment
+            const totalLen = prefix.length + suffix.length;
+
+            // Fixed Pricing Logic
+            let basePrice = 0;
+            if (totalLen <= 4) basePrice = 0.25;
+            else if (totalLen === 5) basePrice = 0.50;
+            else if (totalLen === 6) basePrice = 1.00;
+            else if (totalLen === 7) basePrice = 2.00;
+            else if (totalLen === 8) basePrice = 3.00;
+            else basePrice = 5.00;
+
+            // Apply 50% Discount
+            let cost = basePrice * 0.5;
+
+            let isTrial = (totalLen <= 4 && userTrialsUsed < 2);
+            let transactionSignature = null;
+
+            // If trial, cost is 0
+            if (isTrial) cost = 0;
+
+            // God Mode Skips Payment
+            if (!isGodMode && cost > 0) {
+                 if (!window.solana || !window.solana.isConnected) {
+                     if (window.solana) {
+                         try {
+                             await window.solana.connect();
+                         } catch (err) {
+                             submitBtn.disabled = false;
+                             submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                             alert("Wallet required for payment");
+                             return;
+                         }
+                     } else {
+                         submitBtn.disabled = false;
+                         submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                         alert("Phantom Wallet is required for payment.");
+                         return;
+                     }
+                 }
+
+                 try {
+
+                     // 2. Build Transaction
+                     const TREASURY_PUBKEY = new solanaWeb3.PublicKey(TREASURY_WALLET_ADDRESS);
+                     const fromPubkey = window.solana.publicKey;
+
+                     const transaction = new solanaWeb3.Transaction().add(
+                         solanaWeb3.SystemProgram.transfer({
+                             fromPubkey: fromPubkey,
+                             toPubkey: TREASURY_PUBKEY,
+                             lamports: Math.round(cost * solanaWeb3.LAMPORTS_PER_SOL)
+                         })
+                     );
+
+                     transaction.feePayer = fromPubkey;
+                     // Use the dedicated Helius endpoint
+                     // The user will replace the placeholder with their actual URL
+                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=967f5e67-6a0f-4a1f-b4c6-ad60984f2238", "confirmed");
+                     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+                     transaction.recentBlockhash = blockhash;
+
+                     // 3. Sign and Send
+                     const { signature } = await window.solana.signAndSendTransaction(transaction);
+                     transactionSignature = signature;
+
+                     // 4. Wait for Confirmation
+                     submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Confirming Payment...';
+                     await connection.confirmTransaction({
+                         signature: signature,
+                         blockhash: blockhash,
+                         lastValidBlockHeight: lastValidBlockHeight
+                     });
+
+                 } catch (err) {
+                     console.error(err);
+                     submitBtn.disabled = false;
+                     submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                     errorEl.innerText = "Payment failed: " + err.message;
+                     errorEl.classList.remove('hidden');
+                     return;
+                 }
+            }
+
+            const payload = {
+                user_id: currentUser,
+                prefix: prefix,
+                suffix: suffix,
+                case_sensitive: caseSensitive,
+                pin: pin,
+                transaction_signature: transactionSignature,
+                email: currentUserEmail,
+                notify: notify
+            };
+
+            try {
+                const res = await fetch('/submit-job', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    // Update trials locally for immediate feedback
+                    if (isTrial) userTrialsUsed++;
+                    // Success feedback
+                    document.getElementById('prefix').value = '';
+                    document.getElementById('suffix').value = '';
+                    updateEstimates();
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.message || data.error || "Submission failed.");
+                }
+            } catch (e) {
+                errorEl.innerText = e.message;
+                errorEl.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+            }
+        }
+
+        // POLLING & UI
+        function pollJobStatus() {
+            if (jobListenerUnsubscribe) jobListenerUnsubscribe();
+
+            const container = document.getElementById('jobs-container');
+
+            jobListenerUnsubscribe = db.collection('vanity_jobs')
+                .where('user_id', '==', currentUser)
+                .orderBy('created_at', 'desc')
+                .onSnapshot((snapshot) => {
+                    if (snapshot.empty) {
+                        container.innerHTML = '<p class="text-center text-gray-500 italic py-8">No active jobs found.</p>';
+                        return;
+                    }
+
+                    const fragment = document.createDocumentFragment();
+
+                    snapshot.forEach(doc => {
+                        const job = doc.data();
+                        const status = (job.status || "").toUpperCase();
+
+                        // Check if key is available
+                        const secretKey = job.secret_key; // Encrypted
+
+                        let statusColor = 'text-gray-400';
+                        let statusIcon = '';
+                        let resultHtml = '';
+
+                        if (status === 'COMPLETED') {
+                            statusColor = 'text-green-400';
+                            statusIcon = '<i class="fa-solid fa-check-circle"></i>';
+
+                            // Show Eye Icon and Copy Button
+                            resultHtml = `
+                                <div class="mt-3 bg-gray-900/50 p-3 rounded border border-gray-700/50">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Public Key</span>
+                                        <button onclick="copyToClipboard('${job.public_key}')" class="text-xs text-purple-400 hover:text-purple-300 transition-colors" title="Copy Public Key"><i class="fa-regular fa-copy"></i></button>
+                                    </div>
+                                    <div class="font-mono text-xs break-all text-gray-300 mb-3 bg-black/20 p-2 rounded">${job.public_key}</div>
+
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
+                                        <button onclick="openNumpad('reveal', 'Enter PIN to Unlock', revealKey, '${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
+                                    </div>
+                                    <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
+                                        <div id="key-text-${doc.id}" class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
+                                            <!-- Decrypted key will go here -->
+                                        </div>
+                                        <button onclick="copyKey('${doc.id}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
+                                    </div>
+                                </div>
+                             `;
+                        } else if (status === 'FAILED') {
+                            statusColor = 'text-red-400';
+                            statusIcon = '<i class="fa-solid fa-times-circle"></i>';
+                            resultHtml = `
+                                <div class="mt-2 text-xs text-red-400 italic">
+                                    ${job.error || "Job failed to process."}
+                                </div>
+                            `;
+                        } else {
+                            statusColor = 'text-yellow-400';
+                            statusIcon = '<i class="fa-regular fa-clock animate-spin"></i>';
+                        }
+
+                        const el = document.createElement('div');
+                        el.className = "bg-gray-800 p-4 rounded-lg border border-gray-700 shadow-sm hover:border-gray-600 transition-colors";
+                        el.innerHTML = `
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs font-bold bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600 font-mono">
+                                        ${job.prefix || '...'}-${job.suffix || '...'}
+                                    </span>
+                                    ${job.case_sensitive ? '<span class="text-xs text-purple-400 border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 rounded" title="Case Sensitive">Aa</span>' : ''}
+                                </div>
+                                <span class="text-sm font-bold ${statusColor} capitalize flex items-center gap-1">
+                                    ${statusIcon} ${job.status}
+                                </span>
+                            </div>
+                            <div class="text-[10px] text-gray-600 mb-1 font-mono uppercase tracking-widest">ID: ${doc.id}</div>
+                            ${resultHtml}
+                        `;
+                        fragment.appendChild(el);
+                    });
+
+                    container.innerHTML = '';
+                    container.appendChild(fragment);
+
+                }, (error) => {
+                    console.error("Error polling jobs:", error);
+                    container.innerHTML = '<p class="text-center text-red-500 py-4 bg-red-900/10 rounded border border-red-900/20">Error connection to job server.</p>';
+                });
+        }
+
+        async function revealKey(jobId, pin) {
+            try {
+                const res = await fetch('/reveal-key', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ job_id: jobId, pin: pin })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    const el = document.getElementById(`secret-${jobId}`);
+                    const btn = document.getElementById(`btn-${jobId}`);
+                    const keyText = document.getElementById(`key-text-${jobId}`);
+
+                    keyText.innerText = data.secret_key;
+                    el.classList.remove('hidden');
+                    btn.innerHTML = '<i class="fa-regular fa-eye-slash"></i>';
+                    btn.onclick = () => {
+                         el.classList.add('hidden');
+                         btn.innerHTML = '<i class="fa-regular fa-eye"></i>';
+                         keyText.innerText = '';
+                         // Reset onclick
+                         btn.onclick = () => openNumpad('reveal', 'Enter PIN to Unlock', revealKey, jobId);
+                    };
+                } else {
+                    alert(data.error || "Failed to reveal key.");
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Error revealing key.");
+            }
+        }
+
+        function copyKey(id) {
+            const text = document.getElementById(`key-text-${id}`).innerText;
+            copyToClipboard(text);
+        }
+
+        function copyToClipboard(text) {
+            if (!text) return;
+
+            // Visual Feedback Function
+            const showFeedback = () => {
+                const activeEl = document.activeElement;
+                if(activeEl && (activeEl.tagName === 'BUTTON' || activeEl.closest('button'))) {
+                    const btn = activeEl.tagName === 'BUTTON' ? activeEl : activeEl.closest('button');
+                    const icon = btn.querySelector('i');
+                    if(icon) {
+                        const originalClass = icon.className;
+                        icon.className = "fa-solid fa-check text-green-400";
+
+                        // Tooltip logic
+                        let tooltip = document.createElement("span");
+                        tooltip.className = "absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded shadow-lg animate-fade-in-up z-50 border border-gray-700";
+                        tooltip.innerText = "Copied!";
+                        btn.style.position = "relative";
+                        btn.appendChild(tooltip);
+
+                        setTimeout(() => {
+                            icon.className = "fa-regular fa-copy";
+                            if(tooltip) tooltip.remove();
+                        }, 2000);
+                    }
+                }
+            };
+
+            if (navigator.clipboard && window.isSecureContext) {
+                // Secure context (HTTPS)
+                navigator.clipboard.writeText(text).then(showFeedback).catch(err => {
+                    console.error('Failed to copy via Clipboard API: ', err);
+                    fallbackCopy(text, showFeedback);
+                });
+            } else {
+                // Non-secure context (HTTP)
+                fallbackCopy(text, showFeedback);
+            }
+        }
+
+        function fallbackCopy(text, successCallback) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            textArea.style.top = "0";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    successCallback();
+                } else {
+                    prompt("Copy to clipboard: Ctrl+C, Enter", text);
+                }
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+                prompt("Copy to clipboard: Ctrl+C, Enter", text);
+            }
+
+            document.body.removeChild(textArea);
+        }
+
+        // Global assignments
+        window.loginWithGoogle = loginWithGoogle;
+        window.connectWallet = connectWallet;
+        window.startSubmissionFlow = startSubmissionFlow;
+        window.submitJob = submitJob;
+        window.revealKey = revealKey;
+        window.copyToClipboard = copyToClipboard;
+        window.copyKey = copyKey;
+        window.numpadInput = numpadInput;
+        window.numpadClear = numpadClear;
+        window.numpadSubmit = numpadSubmit;
+        window.closeNumpad = closeNumpad;
+    </script>
+</body>
+</html>
+
+--- requirements.txt ---
+
+Flask
+flask-cors
+google-cloud-firestore
+solders
+base58
+cryptography
+bcrypt
+
+--- README.md ---
+
+# VanityForge
+
+![VanityForge Banner](animated_forge.gif)
+
+## Overview
+
+VanityForge is a high-performance, secure, and user-friendly Solana vanity address generator. It allows users to generate custom Solana addresses (e.g., starting with "CAFE" or "BEEF") using a distributed and optimized backend.
+
+## Features
+
+- **Custom Vanity Addresses:** Generate addresses with custom prefixes and suffixes.
+- **High Performance:** Utilizes multi-core processing for fast key generation.
+- **Secure:**
+    - Private keys are encrypted using a PIN-based key derivation function (PBKDF2 + Fernet).
+    - Private keys are never stored in plain text.
+    - Zero-knowledge architecture where possible.
+- **User Friendly:**
+    - Simple and intuitive web interface.
+    - Real-time job status updates.
+    - Email notifications upon job completion.
+- **Cost Effective:**
+    - Competitive pricing with a trial tier for testing.
+    - 50% Beta Discount currently active!
+
+## Architecture
+
+### Backend (`vm_server.py`)
+- Built with Flask and Python.
+- Manages job queues and background worker processes.
+- Uses `multiprocessing` to maximize CPU usage.
+- Integrates with Google Cloud Firestore for state management.
+- Handles payment verification via Solana RPC.
+
+### Frontend (`index.html`)
+- Single-page application using HTML, JavaScript, and Tailwind CSS.
+- Connects to Firebase Auth for user management.
+- Integrates with Phantom Wallet for Solana payments.
+- Real-time updates via Firestore listeners.
+
+## Security ("Fort Knox")
+
+We take security seriously.
+
+1.  **PIN Protection:** Your private keys are encrypted with a key derived from a 6-digit PIN that only you know. The server only stores a hash of this PIN to verify it, meaning we cannot decrypt your keys without your input.
+2.  **Ephemeral Processing:** Keys are generated in memory and immediately encrypted before storage.
+3.  **Strict Isolation:** The backend binds to localhost and is only accessible via a reverse proxy (Caddy), preventing direct external attacks.
+
+### Certified Security
+![SSL Qual](assets/sslqual.png)
+
+## Getting Started
+
+### Prerequisites
+- Python 3.8+
+- Google Cloud Firestore credentials
+- A Solana RPC URL
+
+### Installation
+
+1.  Clone the repository.
+2.  Install dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  Set up environment variables or configure `vm_server.py` directly (not recommended for production).
+4.  Run the server:
+    ```bash
+    python vm_server.py
+    ```
+
+## Roadmap
+
+Check out our [Roadmap](roadmap.html) page for future plans!
+
+## License
+
+[MIT License](LICENSE)
+
+--- /etc/caddy/Caddyfile ---
+
+(File not accessible or does not exist in the repository root. It is likely a system configuration file located at /etc/caddy/Caddyfile on the production server.)
