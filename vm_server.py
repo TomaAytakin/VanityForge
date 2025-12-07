@@ -12,6 +12,7 @@ import hashlib
 import math
 import requests
 import smtplib
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify
@@ -30,6 +31,7 @@ load_dotenv()
 PROJECT_ID = os.getenv('PROJECT_ID', 'vanityforge')
 SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL')
 TREASURY_PUBKEY = os.getenv('TREASURY_PUBKEY')
+GPU_SERVICE_URL = os.getenv('GPU_SERVICE_URL')
 SMTP_EMAIL = os.getenv('SMTP_EMAIL')
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
 SMTP_SERVER = "smtp.gmail.com"
@@ -276,7 +278,20 @@ def submit_job():
         })
         
         if total_len >= GPU_OFFLOAD_THRESHOLD:
-            print(f"Offloading Job {job_id} (Length {total_len}) to GPU Worker.")
+            print(f"Dispatched Job {job_id} to GPU Service")
+            def dispatch_gpu():
+                try:
+                    payload = {
+                        'job_id': job_id,
+                        'prefix': prefix,
+                        'suffix': suffix,
+                        'case_sensitive': data.get('case_sensitive', True)
+                    }
+                    requests.post(GPU_SERVICE_URL, json=payload, timeout=5)
+                except Exception as e:
+                    print(f"Failed to dispatch job {job_id} to GPU service: {e}")
+
+            threading.Thread(target=dispatch_gpu).start()
         else:
             p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin, est < 900, email, notify))
             p.start()
