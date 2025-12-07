@@ -1,4 +1,4 @@
-FROM rust:1.77-slim-bookworm
+FROM rust:1.81-slim-bookworm
 
 # Install Python and dependencies
 RUN apt-get update && apt-get install -y \
