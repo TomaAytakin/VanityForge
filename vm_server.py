@@ -24,15 +24,15 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configuration
 PROJECT_ID = 'vanityforge'
-SOLANA_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=b9a8642a-d184-417f-91ab-efc25ab66b99"
-TREASURY_PUBKEY = "CUfjsGUee8u83dfFxHt1jXJUCRLiF1KoWVYcKyVforGe"
+SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL', "https://mainnet.helius-rpc.com/?api-key=b9a8642a-d184-417f-91ab-efc25ab66b99")
+TREASURY_PUBKEY = os.getenv('TREASURY_PUBKEY', "CUfjsGUee8u83dfFxHt1jXJUCRLiF1KoWVYcKyVforGe")
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
 
 # Email Configuration Placeholders
 SMTP_SERVER = "smtp.gmail.com" # Placeholder
 SMTP_PORT = 587
-SMTP_EMAIL = "your_email@gmail.com" # Placeholder
-SMTP_PASSWORD = "your_password" # Placeholder
+SMTP_EMAIL = os.getenv('SMTP_EMAIL', "your_email@gmail.com") # Placeholder
+SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', "your_password") # Placeholder
 
 # Serve static files from the current directory
 app = Flask(__name__, static_folder='.', static_url_path='')
@@ -125,7 +125,7 @@ def check_user_trials(user_id):
         print(f"Error checking trials: {e}")
         return 2 # Fail safe: assume no trials left if error
 
-def verify_payment(signature):
+def verify_payment(signature, required_price_sol):
     """Verifies that a transaction is successful on-chain."""
     if not signature: return False
 
@@ -154,8 +154,36 @@ def verify_payment(signature):
         if result.get("meta", {}).get("err"):
              return False # Transaction failed
 
-        # In a full implementation, we would parse 'transaction' -> 'message' -> 'accountKeys'
-        # and 'meta' -> 'postBalances' - 'preBalances' to verify amount transferred to TREASURY_PUBKEY.
+        # Parse transaction to verify payment to Treasury
+        transaction = result.get("transaction", {})
+        message = transaction.get("message", {})
+        account_keys = message.get("accountKeys", [])
+
+        try:
+            # accountKeys is usually a list of strings for json encoding
+            treasury_index = account_keys.index(TREASURY_PUBKEY)
+        except ValueError:
+            print(f"Treasury key {TREASURY_PUBKEY} not found in transaction")
+            return False
+
+        meta = result.get("meta", {})
+        pre_balances = meta.get("preBalances", [])
+        post_balances = meta.get("postBalances", [])
+
+        if len(pre_balances) <= treasury_index or len(post_balances) <= treasury_index:
+            return False
+
+        pre_bal = pre_balances[treasury_index]
+        post_bal = post_balances[treasury_index]
+
+        # Balance change in lamports
+        diff_lamports = post_bal - pre_bal
+        diff_sol = diff_lamports / 1_000_000_000
+
+        # Verify amount matches required price (allow small tolerance for float math)
+        if diff_sol < required_price_sol - 0.000001:
+             print(f"Insufficient payment: {diff_sol} < {required_price_sol}")
+             return False
 
         return True
     except Exception as e:
@@ -483,7 +511,7 @@ def submit_job():
         if not transaction_signature:
              return jsonify({'error': f'Payment of {price_sol:.4f} SOL required.'}), 402
 
-        if not verify_payment(transaction_signature):
+        if not verify_payment(transaction_signature, price_sol):
              return jsonify({'error': 'Payment verification failed. Transaction invalid or not confirmed.'}), 402
 
     # Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
