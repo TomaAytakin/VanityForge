@@ -29,10 +29,10 @@ TREASURY_PUBKEY = "2d8W2qgRi7BCMTuyv2ZHbf9zJi5C1hT4VRudRnxZifVD"
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
 
 # Email Configuration Placeholders
-SMTP_SERVER = "smtp.gmail.com" # Placeholder
+SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_EMAIL = "your_email@gmail.com" # Placeholder
-SMTP_PASSWORD = "your_password" # Placeholder
+SMTP_EMAIL = "support@vanityforge.org"
+SMTP_PASSWORD = "znsm slnc avke elvu"
 
 # Serve static files from the current directory
 app = Flask(__name__, static_folder='.', static_url_path='')
@@ -125,8 +125,8 @@ def check_user_trials(user_id):
         print(f"Error checking trials: {e}")
         return 2 # Fail safe: assume no trials left if error
 
-def verify_payment(signature):
-    """Verifies that a transaction is successful on-chain."""
+def verify_payment(signature, required_amount_sol):
+    """Verifies that a transaction is successful on-chain and transferred the correct amount."""
     if not signature: return False
 
     payload = {
@@ -154,10 +154,32 @@ def verify_payment(signature):
         if result.get("meta", {}).get("err"):
              return False # Transaction failed
 
-        # In a full implementation, we would parse 'transaction' -> 'message' -> 'accountKeys'
-        # and 'meta' -> 'postBalances' - 'preBalances' to verify amount transferred to TREASURY_PUBKEY.
+        transaction = result.get("transaction", {})
+        message = transaction.get("message", {})
+        account_keys = message.get("accountKeys", [])
 
-        return True
+        try:
+            treasury_index = account_keys.index(TREASURY_PUBKEY)
+        except ValueError:
+            print(f"Treasury not found in transaction {signature}")
+            return False
+
+        meta = result.get("meta", {})
+        pre_balances = meta.get("preBalances", [])
+        post_balances = meta.get("postBalances", [])
+
+        if treasury_index >= len(pre_balances) or treasury_index >= len(post_balances):
+            return False
+
+        amount_received_lamports = post_balances[treasury_index] - pre_balances[treasury_index]
+        amount_received_sol = amount_received_lamports / 1000000000
+
+        if amount_received_sol >= required_amount_sol:
+            return True
+        else:
+            print(f"Insufficient payment: {amount_received_sol} < {required_amount_sol}")
+            return False
+
     except Exception as e:
         print(f"Verification Exception: {e}")
         return False
@@ -483,7 +505,7 @@ def submit_job():
         if not transaction_signature:
              return jsonify({'error': f'Payment of {price_sol:.4f} SOL required.'}), 402
 
-        if not verify_payment(transaction_signature):
+        if not verify_payment(transaction_signature, price_sol):
              return jsonify({'error': 'Payment verification failed. Transaction invalid or not confirmed.'}), 402
 
     # Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
