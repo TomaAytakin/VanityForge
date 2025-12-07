@@ -181,7 +181,7 @@ def send_completion_email(to_email, job_id, public_key):
         server.quit()
     except Exception as e: print(f"Email failed: {e}")
 
-def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick, email=None, notify=False):
+def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, email=None, notify=False):
     # DEDICATE TOTAL_GRINDING_CORES to this single worker
     pool_size = TOTAL_GRINDING_CORES
     try:
@@ -295,12 +295,9 @@ def scheduler_loop():
                             # Update status FIRST to reserve slot
                             db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
-                            est_seconds = (0.5 * (58 ** (len(data.get('prefix') or '') + len(data.get('suffix') or '')))) / 5000000
-                            is_quick = est_seconds < 900
-
                             # Start Local Process (NOTE: pin_plain is passed securely to the worker)
                             try:
-                                p = multiprocessing.Process(target=background_grinder, args=(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain, is_quick, data.get('email'), data.get('notify')))
+                                p = multiprocessing.Process(target=background_grinder, args=(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain, data.get('email'), data.get('notify')))
                                 p.start()
                                 running_local += 1
                             except Exception as pe:
