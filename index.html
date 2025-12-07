@@ -692,7 +692,7 @@
                      transaction.feePayer = fromPubkey;
                      // Use the dedicated Helius endpoint
                      // The user will replace the placeholder with their actual URL
-                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=967f5e67-6a0f-4a1f-b4c6-ad60984f2238", "confirmed");
+                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=b9a8642a-d184-417f-91ab-efc25ab66b99", "confirmed");
                      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
 

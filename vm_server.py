@@ -24,8 +24,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configuration
 PROJECT_ID = 'vanityforge'
-SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
-TREASURY_PUBKEY = "2d8W2qgRi7BCMTuyv2ZHbf9zJi5C1hT4VRudRnxZifVD"
+SOLANA_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=b9a8642a-d184-417f-91ab-efc25ab66b99"
+TREASURY_PUBKEY = "CUfjsGUee8u83dfFxHt1jXJUCRLiF1KoWVYcKyVforGe"
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
 
 # Email Configuration Placeholders
