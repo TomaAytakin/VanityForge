@@ -1,5 +1,6 @@
 import subprocess
 import os
+import json
 import firebase_admin
 from firebase_admin import credentials, firestore
 import base64
@@ -22,28 +23,35 @@ def generate_key_from_pin(pin, user_id):
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
 def run_rust_grinder(prefix, suffix, case_sensitive):
-    cmd = ["solana-vanity", "--prefix", prefix, "--suffix", suffix, "--no-grid"]
+    # Call the new Rust binary
+    cmd = ["./target/release/vanity-grinder"]
+
+    if prefix:
+        cmd.extend(["--prefix", prefix])
+    if suffix:
+        cmd.extend(["--suffix", suffix])
     if not case_sensitive:
         cmd.append("--ignore-case")
 
     try:
         # Run the command and capture output
+        # The rust binary prints JSON to stdout and exits with 0 on success
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        stdout = result.stdout
+        stdout = result.stdout.strip()
 
-        address = None
-        secret = None
-
-        for line in stdout.splitlines():
-            line = line.strip()
-            if line.startswith("Address:"):
-                address = line.split("Address:", 1)[1].strip()
-            if line.startswith("Secret:"):
-                secret = line.split("Secret:", 1)[1].strip()
+        data = json.loads(stdout)
+        address = data.get("public_key")
+        secret = data.get("secret_key")
 
         return address, secret
     except subprocess.CalledProcessError as e:
         print(f"Error running rust grinder: {e}")
+        # Try to print stderr for debugging
+        print(f"Stderr: {e.stderr}")
+        return None, None
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON output: {e}")
+        print(f"Raw output: {result.stdout}")
         return None, None
     except Exception as e:
         print(f"Unexpected error: {e}")

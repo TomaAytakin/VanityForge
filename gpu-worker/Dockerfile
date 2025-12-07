@@ -1,30 +1,29 @@
-FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
+FROM rust:1.75-slim-bookworm
 
-# Install System Deps
+# Install Python and dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
-    curl \
-    build-essential \
-    libssl-dev \
     pkg-config \
+    libssl-dev \
+    udev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+WORKDIR /app
 
-# Update Path
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Copy Cargo files and source code
+COPY Cargo.toml .
+COPY src/ src/
 
-# Install Logic
-RUN cargo install solana-vanity
+# Build the release binary
+RUN cargo build --release
 
-# Setup Python
+# Copy Python requirements and install them
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt
+RUN pip3 install -r requirements.txt --break-system-packages
 
-# Setup Worker
+# Copy the worker script
 COPY worker.py .
 
-# Command
+# Run the worker script
 CMD ["python3", "worker.py"]
