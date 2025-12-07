@@ -2,6 +2,7 @@ import os
 import uuid
 import logging
 import multiprocessing
+import threading
 import base58
 import re
 import time
@@ -17,7 +18,7 @@ from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.cloud import firestore
-from google.cloud import run_v2  # <--- CRITICAL IMPORT
+from google.cloud import run_v2
 from solders.keypair import Keypair
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -26,6 +27,11 @@ from dotenv import load_dotenv
 
 # 1. LOAD SECRETS
 load_dotenv()
+
+# --- DYNAMIC CORE ALLOCATION ---
+# Calculate cores for grinding, reserving 1 for the API/System
+TOTAL_CORES = multiprocessing.cpu_count()
+TOTAL_GRINDING_CORES = max(1, TOTAL_CORES - 1) 
 
 # 2. CONFIGURATION
 PROJECT_ID = os.getenv('PROJECT_ID', 'vanityforge')
@@ -37,7 +43,11 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
 
-# GPU CONFIGURATION
+# --- QUEUE LIMITS (TRAFFIC CONTROL) ---
+MAX_LOCAL_JOBS = 1   # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
+MAX_CLOUD_JOBS = 50  # Max concurrent "Hard" jobs on Cloud Run
+
+# CLOUD JOB CONFIGURATION
 GPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker"
 
 # 3. SAFETY CHECK
@@ -57,17 +67,13 @@ def roadmap(): return app.send_static_file('roadmap.html')
 @app.route('/faq')
 def faq(): return app.send_static_file('faq.html')
 
-MAX_CONCURRENT_JOBS = 6
-sem_general = multiprocessing.Semaphore(4)
-sem_reserved = multiprocessing.Semaphore(2)
-
 def is_base58(s):
     if not s: return True
     return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', s))
 
 # --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
 def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
-    """Triggers the remote GPU Cloud Run Job."""
+    """Triggers the remote Cloud Run Job (8 vCPU or GPU)."""
     try:
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(
@@ -86,12 +92,12 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
             }
         )
         operation = client.run_job(request=request)
-        print(f"🚀 Dispatched GPU Job: {job_id}")
+        print(f"🚀 Dispatched Cloud Job: {job_id}")
     except Exception as e:
-        print(f"❌ Failed to dispatch GPU job: {e}")
-        # Mark as failed in DB so user isn't stuck
+        print(f"❌ Failed to dispatch Cloud job: {e}")
+        # Mark as failed in DB so user isn't stuck forever
         db = firestore.Client(project=PROJECT_ID)
-        db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'GPU Dispatch Failed'})
+        db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'Cloud Dispatch Failed'})
 
 # --- LOCAL CPU LOGIC ---
 def check_key_batch(prefix, suffix, case_sensitive, batch_size):
@@ -141,6 +147,7 @@ def verify_payment(signature, required_price_sol):
 
         received_sol = (meta.get("postBalances")[idx] - meta.get("preBalances")[idx]) / 1_000_000_000
         
+        # Allow tiny variance for fees
         if received_sol < (required_price_sol - 0.0001):
             print(f"Insufficient: {received_sol} < {required_price_sol}")
             return False
@@ -173,26 +180,16 @@ def send_completion_email(to_email, job_id, public_key):
     except Exception as e: print(f"Email failed: {e}")
 
 def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_quick, email=None, notify=False):
-    pool_size = max(1, multiprocessing.cpu_count() - 1)
+    # DEDICATE TOTAL_GRINDING_CORES to this single worker
+    pool_size = TOTAL_GRINDING_CORES
     try:
-        acquired_general = False
-        acquired_reserved = False
-        if is_quick:
-            if sem_general.acquire(block=False): acquired_general = True
-            else: 
-                sem_reserved.acquire()
-                acquired_reserved = True
-        else:
-            sem_general.acquire()
-            acquired_general = True
-
         db = firestore.Client(project=PROJECT_ID)
         checkpoint_ref = db.collection('job_checkpoints').document(job_id)
         doc = checkpoint_ref.get()
         total_attempts = doc.to_dict().get('last_attempt_number', 0) if doc.exists else 0
         last_save = total_attempts
         
-        db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+        # NOTE: Status is already set to 'RUNNING' by the scheduler before calling this
         BATCH_SIZE = 50000
 
         with multiprocessing.Pool(processes=pool_size) as pool:
@@ -239,9 +236,76 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, is_
     except Exception as e:
         try: firestore.Client(project=PROJECT_ID).collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': str(e)})
         except: pass
-    finally:
-        if 'acquired_general' in locals() and acquired_general: sem_general.release()
-        if 'acquired_reserved' in locals() and acquired_reserved: sem_reserved.release()
+
+# --- QUEUE SCHEDULER (THE TRAFFIC CONTROLLER) ---
+def scheduler_loop():
+    """Background thread that checks for open slots and starts queued jobs."""
+    print("✅ Queue Scheduler Started")
+    while True:
+        try:
+            db = firestore.Client(project=PROJECT_ID)
+            
+            # 1. Count CURRENTLY running jobs
+            running_cloud = 0
+            running_local = 0
+            running_docs = db.collection('vanity_jobs').where('status', '==', 'RUNNING').stream()
+            for d in running_docs:
+                if d.to_dict().get('is_cloud', False): running_cloud += 1
+                else: running_local += 1
+            
+            # 2. Fetch QUEUED jobs (Oldest first = Fairness)
+            queued_docs = db.collection('vanity_jobs').where('status', '==', 'QUEUED').order_by('created_at').limit(10).stream()
+            
+            for doc in queued_docs:
+                data = doc.to_dict()
+                job_id = data.get('job_id')
+                is_cloud = data.get('is_cloud', False)
+                
+                # Retrieve the temporary PIN needed for encryption
+                pin_plain = data.get('temp_pin')
+                if not pin_plain:
+                    # Error state: Lost PIN? Fail job to clear queue
+                    print(f"❌ Job {job_id} missing temp_pin, marking FAILED")
+                    db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'PIN missing in queue'})
+                    continue
+
+                # --- DISPATCH LOGIC ---
+                if is_cloud:
+                    # RULE: Cloud jobs (Paid/Hard) -> Cloud Run Queue
+                    if running_cloud < MAX_CLOUD_JOBS:
+                        print(f"🚦 Dispatching Cloud Job: {job_id}")
+                        db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+                        
+                        # Trigger Cloud Run
+                        dispatch_cloud_job(job_id, data['user_id'], data['prefix'], data['suffix'], data['case_sensitive'], pin_plain)
+                        
+                        # Cleanup temp PIN for security
+                        db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
+                        running_cloud += 1
+                
+                else:
+                    # RULE: Local jobs (Free/Easy) -> VM Queue
+                    if running_local < MAX_LOCAL_JOBS:
+                        print(f"🚦 Starting Local Job: {job_id}")
+                        db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+                        
+                        est_seconds = (0.5 * (58 ** (len(data.get('prefix') or '') + len(data.get('suffix') or '')))) / 5000000
+                        is_quick = est_seconds < 900
+                        
+                        # Start Local Process
+                        # NOTE: We rely on the dynamic TOTAL_GRINDING_CORES here.
+                        p = multiprocessing.Process(target=background_grinder, args=(job_id, data['user_id'], data['prefix'], data['suffix'], data['case_sensitive'], pin_plain, is_quick, data.get('email'), data.get('notify')))
+                        p.start()
+                        
+                        # Cleanup temp PIN
+                        db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
+                        running_local += 1
+
+        except Exception as e:
+            print(f"Scheduler Error: {e}")
+        
+        # Check queue every 5 seconds
+        time.sleep(5)
 
 @app.route('/check-user', methods=['POST'])
 def check_user():
@@ -283,10 +347,10 @@ def submit_job():
         
         is_admin = (email == ADMIN_EMAIL)
         
-        # --- NEW HYBRID LOGIC ---
+        # --- DETERMINE JOB TYPE (CLOUD vs LOCAL) ---
         total_len = len(prefix or '') + len(suffix or '')
         
-        # Prices
+        # Prices Logic
         if total_len <= 4: base = 0.25
         elif total_len == 5: base = 0.50
         elif total_len == 6: base = 1.00
@@ -294,9 +358,10 @@ def submit_job():
         elif total_len == 8: base = 3.00
         else: base = 5.00
         
+        # Free logic: <5 chars AND trials remaining
         price = 0.0 if (total_len <= 4 and check_user_trials(user_id) < 2) or is_admin else base * 0.5
         
-        # Hard Limit for Beta (Prevent infinite cost)
+        # Hard Limit
         if total_len > 8: return jsonify({'error': 'Max 8 chars allowed in Beta'}), 403
 
         # Payment Check
@@ -305,28 +370,30 @@ def submit_job():
             if not verify_payment(tx_sig, price): return jsonify({'error': 'Payment verification failed'}), 402
 
         job_id = str(uuid.uuid4())
-        est_seconds = (0.5 * (58 ** total_len)) / 5000000
         
-        # Save Initial State
+        # --- JOB QUEUE LOGIC ---
+        # 1. Determine "Hard" vs "Easy"
+        is_cloud_job = (total_len >= 5) 
+
+        # 2. Save Initial State as 'QUEUED'
         db.collection('vanity_jobs').document(job_id).set({
-            'job_id': job_id, 'user_id': user_id, 'prefix': prefix, 'suffix': suffix, 'case_sensitive': data.get('case_sensitive', True),
-            'status': 'QUEUED', 'created_at': firestore.SERVER_TIMESTAMP, 'is_trial': (price == 0), 'price_sol': price,
-            'transaction_signature': tx_sig, 'email': email, 'notify': notify
+            'job_id': job_id, 
+            'user_id': user_id, 
+            'prefix': prefix, 
+            'suffix': suffix, 
+            'case_sensitive': data.get('case_sensitive', True),
+            'status': 'QUEUED', 
+            'is_cloud': is_cloud_job,
+            'temp_pin': pin,
+            'created_at': firestore.SERVER_TIMESTAMP, 
+            'is_trial': (price == 0), 
+            'price_sol': price,
+            'transaction_signature': tx_sig, 
+            'email': email, 
+            'notify': notify
         })
         
-        # --- BRANCH: GPU vs CPU ---
-        if total_len >= 5:
-            # DISPATCH TO CLOUD RUN
-            print(f"⚡ Dispatching Job {job_id} (Len {total_len}) to Cloud Run GPU")
-            dispatch_cloud_job(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin)
-            # We return immediately, user sees "Queued" -> "Running" -> "Completed"
-        else:
-            # LOCAL CPU
-            is_quick = est_seconds < 900
-            p = multiprocessing.Process(target=background_grinder, args=(job_id, user_id, prefix, suffix, data.get('case_sensitive', True), pin, is_quick, email, notify))
-            p.start()
-
-        return jsonify({'job_id': job_id, 'message': 'Accepted'}), 202
+        return jsonify({'job_id': job_id, 'message': 'Job Queued successfully'}), 202
 
     except Exception as e: return jsonify({'error': str(e)}), 500
 
@@ -348,4 +415,7 @@ def reveal_key():
 
 if __name__ == '__main__':
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    # START THE TRAFFIC CONTROLLER THREAD
+    t = threading.Thread(target=scheduler_loop, daemon=True)
+    t.start()
     app.run(host='127.0.0.1', port=8080)
