@@ -8,6 +8,18 @@ Stop settling for random addresses. Demand a customized identity that commands *
 
 ---
 
+## 🛡️ Open Source: Our Confidence is Our Firewall
+
+VanityForge operates on a principle of <u>full transparency</u>. Our core logic is visible for inspection because we believe trust is the highest form of security.
+
+### Auditability
+Every user—from the layperson to the advanced developer—can inspect our code to verify that the encryption logic is correct and that we are not stealing private keys. You don't have to trust us; you can verify us.
+
+### Competitive Advantage
+We are not afraid of competition. Our competitive edge lies not in secret code, but in our proprietary, cost-optimized Compute Engine Infrastructure, our fast payment pipeline, and our advanced resource management system. We win on execution and speed, not secrecy.
+
+---
+
 ## 🔒 The "Fort Knox" Security Model
 
 ![Bank Vault Security](https://github.com/TomaAytakin/VanityForge/blob/main/assets/fortknoxreadme.png)
