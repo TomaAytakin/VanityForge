@@ -8,3 +8,4 @@ cryptography
 bcrypt
 python-dotenv
 requests
+Flask-Limiter

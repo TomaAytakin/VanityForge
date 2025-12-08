@@ -24,9 +24,14 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from dotenv import load_dotenv
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 # 1. LOAD SECRETS
 load_dotenv()
+
+# --- LOGGING CONFIGURATION ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- DYNAMIC CORE ALLOCATION ---
 # Calculate cores for grinding, reserving 1 for the API/System
@@ -34,11 +39,11 @@ TOTAL_CORES = multiprocessing.cpu_count()
 TOTAL_GRINDING_CORES = max(1, TOTAL_CORES - 1) 
 
 # 2. CONFIGURATION
-PROJECT_ID = os.getenv('PROJECT_ID', 'vanityforge')
-SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL')
-TREASURY_PUBKEY = os.getenv('TREASURY_PUBKEY')
-SMTP_EMAIL = os.getenv('SMTP_EMAIL')
-SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
+PROJECT_ID = os.getenv('PROJECT_ID', 'vanityforge').strip()
+SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL', '').strip()
+TREASURY_PUBKEY = os.getenv('TREASURY_PUBKEY', '').strip()
+SMTP_EMAIL = os.getenv('SMTP_EMAIL', '').strip()
+SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '').strip()
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
@@ -52,11 +57,18 @@ GPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-wo
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
-    print("CRITICAL ERROR: Missing environment variables. Make sure .env exists.")
+    logging.critical("CRITICAL ERROR: Missing environment variables. Make sure .env exists.")
     exit(1)
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
+
+# --- RATE LIMITER CONFIGURATION ---
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri="memory://"
+)
 
 @app.route('/')
 def index(): return app.send_static_file('index.html')
@@ -73,7 +85,7 @@ def cleanup_firestore_client(db):
             # Explicitly close the underlying gRPC channel
             db._channel.close()
     except Exception as e:
-        print(f"Error during client cleanup: {e}")
+        logging.exception("Error during client cleanup")
 
 def is_base58(s):
     if not s: return True
@@ -100,12 +112,15 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
             }
         )
         operation = client.run_job(request=request)
-        print(f"🚀 Dispatched Cloud Job: {job_id}")
+        logging.info(f"🚀 Dispatched Cloud Job: {job_id}")
     except Exception as e:
-        print(f"❌ Failed to dispatch Cloud job: {e}")
+        logging.exception(f"❌ Failed to dispatch Cloud job")
         # Mark as failed in DB so user isn't stuck forever
         db = firestore.Client(project=PROJECT_ID)
-        db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'Cloud Dispatch Failed'})
+        try:
+            db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'Cloud Dispatch Failed'})
+        finally:
+            cleanup_firestore_client(db)
 
 # --- LOCAL CPU LOGIC ---
 def check_key_batch(prefix, suffix, case_sensitive, batch_size):
@@ -124,11 +139,14 @@ def worker_batch_wrapper(args):
     return check_key_batch(*args)
 
 def check_user_trials(user_id):
+    db = None
     try:
         db = firestore.Client(project=PROJECT_ID)
         docs = db.collection('vanity_jobs').where('user_id', '==', user_id).stream()
         return sum(1 for doc in docs if doc.to_dict().get('is_trial'))
     except: return 2
+    finally:
+        cleanup_firestore_client(db)
 
 def verify_payment(signature, required_price_sol):
     if not signature: return False
@@ -152,18 +170,18 @@ def verify_payment(signature, required_price_sol):
         try:
             idx = accounts.index(TREASURY_PUBKEY)
         except ValueError:
-            print(f"Treasury not found in tx")
+            logging.warning(f"Treasury not found in tx")
             return False
 
         received_sol = (meta.get("postBalances")[idx] - meta.get("preBalances")[idx]) / 1_000_000_000
         
         # Allow tiny variance for fees
         if received_sol < (required_price_sol - 0.0001):
-            print(f"Insufficient: {received_sol} < {required_price_sol}")
+            logging.warning(f"Insufficient: {received_sol} < {required_price_sol}")
             return False
         return True
     except Exception as e:
-        print(f"Verify Error: {e}")
+        logging.exception(f"Verify Error")
         return False
 
 def get_deterministic_salt(user_id):
@@ -187,11 +205,12 @@ def send_completion_email(to_email, job_id, public_key):
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
         server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
         server.quit()
-    except Exception as e: print(f"Email failed: {e}")
+    except Exception as e: logging.exception(f"Email failed")
 
 def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, email=None, notify=False):
     # DEDICATE TOTAL_GRINDING_CORES to this single worker
     pool_size = TOTAL_GRINDING_CORES
+    db = None
     try:
         db = firestore.Client(project=PROJECT_ID)
         checkpoint_ref = db.collection('job_checkpoints').document(job_id)
@@ -244,14 +263,19 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, ema
             checkpoint_ref.delete()
 
     except Exception as e:
-        try: firestore.Client(project=PROJECT_ID).collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': str(e)})
-        except: pass
+        logging.exception("Background grinder failed")
+        if db:
+            try: db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': str(e)})
+            except: pass
+    finally:
+        cleanup_firestore_client(db)
 
 # --- QUEUE SCHEDULER (THE TRAFFIC CONTROLLER) ---
 def scheduler_loop():
     """Background thread that checks for open slots and starts queued jobs."""
-    print("✅ Queue Scheduler Started")
+    logging.info("✅ Queue Scheduler Started")
     while True:
+        db = None
         try:
             db = firestore.Client(project=PROJECT_ID)
             
@@ -277,7 +301,7 @@ def scheduler_loop():
                     pin_plain = data.get('temp_pin')
                     if not pin_plain:
                         # Error state: Lost PIN? Fail job to clear queue
-                        print(f"❌ Job {job_id} missing temp_pin, marking FAILED")
+                        logging.error(f"❌ Job {job_id} missing temp_pin, marking FAILED")
                         db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'PIN missing in queue'})
                         continue
 
@@ -285,7 +309,7 @@ def scheduler_loop():
                     if is_cloud:
                         # RULE: Cloud jobs (Paid/Hard) -> Cloud Run Queue
                         if running_cloud < MAX_CLOUD_JOBS:
-                            print(f"🚦 Dispatching Cloud Job: {job_id}")
+                            logging.info(f"🚦 Dispatching Cloud Job: {job_id}")
                             db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
                             # Cleanup temp PIN for security BEFORE dispatching
@@ -299,7 +323,7 @@ def scheduler_loop():
                     else:
                         # RULE: Local jobs (Free/Easy) -> VM Queue
                         if running_local < MAX_LOCAL_JOBS:
-                            print(f"🚦 Starting Local Job: {job_id}")
+                            logging.info(f"🚦 Starting Local Job: {job_id}")
                             # Update status FIRST to reserve slot
                             db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
@@ -309,7 +333,7 @@ def scheduler_loop():
                                 p.start()
                                 running_local += 1
                             except Exception as pe:
-                                print(f"❌ Failed to start process for {job_id}: {pe}")
+                                logging.exception(f"❌ Failed to start process for {job_id}")
                                 db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': f"Process Start Failed: {pe}"})
                                 continue
 
@@ -317,14 +341,16 @@ def scheduler_loop():
                             db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
 
                 except Exception as e:
-                    print(f"❌ Error processing job {doc.id}: {e}")
+                    logging.exception(f"❌ Error processing job {doc.id}")
                     try:
                         db.collection('vanity_jobs').document(doc.id).update({'status': 'FAILED', 'error': str(e)})
                     except: pass
 
         except Exception as e:
             # The database index failure logs here.
-            print(f"Scheduler Error: {e}")
+            logging.exception(f"Scheduler Error")
+        finally:
+            cleanup_firestore_client(db)
         
         # Check queue every 5 seconds
         time.sleep(5)
@@ -333,23 +359,31 @@ def scheduler_loop():
 def check_user():
     data = request.get_json(silent=True) or {}
     user_id = data.get('user_id')
+    db = None
     try:
         db = firestore.Client(project=PROJECT_ID)
         doc = db.collection('users').document(user_id).get()
         return jsonify({'has_pin': bool(doc.exists and doc.to_dict().get('pin_hash')), 'trials_used': check_user_trials(user_id)})
     except Exception as e: return jsonify({'error': str(e)}), 500
+    finally:
+        cleanup_firestore_client(db)
 
 @app.route('/set-pin', methods=['POST'])
 def set_pin():
     data = request.get_json(silent=True) or {}
     user_id, pin = data.get('user_id'), data.get('pin')
+    db = None
     try:
         hashed = bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
-        firestore.Client(project=PROJECT_ID).collection('users').document(user_id).set({'user_id': user_id, 'pin_hash': hashed, 'updated_at': firestore.SERVER_TIMESTAMP}, merge=True)
+        db = firestore.Client(project=PROJECT_ID)
+        db.collection('users').document(user_id).set({'user_id': user_id, 'pin_hash': hashed, 'updated_at': firestore.SERVER_TIMESTAMP}, merge=True)
         return jsonify({'message': 'PIN set'})
     except Exception as e: return jsonify({'error': str(e)}), 500
+    finally:
+        cleanup_firestore_client(db)
 
 @app.route('/submit-job', methods=['POST'])
+@limiter.limit("60 per minute")
 def submit_job():
     data = request.get_json(silent=True) or {}
     user_id = data.get('userId') or data.get('user_id')
@@ -365,6 +399,16 @@ def submit_job():
     try:
         # 1. Instantiate the client (always fresh)
         db = firestore.Client(project=PROJECT_ID)
+
+        # --- ACTIVE JOB CHECK ---
+        active_jobs = db.collection('vanity_jobs') \
+            .where('user_id', '==', user_id) \
+            .where('status', 'in', ['QUEUED', 'RUNNING']) \
+            .limit(1).stream()
+
+        if any(active_jobs):
+            return jsonify({'error': 'You have an active job'}), 400
+
         udoc = db.collection('users').document(user_id).get()
         if not udoc.exists or not udoc.to_dict().get('pin_hash'): return jsonify({'error': 'PIN not set'}), 400
         if not bcrypt.checkpw(pin.encode(), udoc.to_dict().get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
@@ -420,6 +464,7 @@ def submit_job():
         return jsonify({'job_id': job_id, 'message': 'Job Queued successfully'}), 202
 
     except Exception as e:
+        logging.exception("Submit job failed")
         return jsonify({'error': str(e)}), 500
 
     finally:
@@ -430,6 +475,7 @@ def submit_job():
 def reveal_key():
     data = request.get_json(silent=True) or {}
     job_id, pin = data.get('job_id'), data.get('pin')
+    db = None
     try:
         db = firestore.Client(project=PROJECT_ID)
         job = db.collection('vanity_jobs').document(job_id).get()
@@ -448,8 +494,10 @@ def reveal_key():
         key = generate_key_from_pin(pin, jdata['user_id'])
         return jsonify({'secret_key': Fernet(key).decrypt(jdata['secret_key'].encode()).decode()})
     except Exception as e: 
-        print(f"Decryption Error: {e}")
+        logging.exception("Decryption Error")
         return jsonify({'error': 'Decryption failed'}), 400
+    finally:
+        cleanup_firestore_client(db)
 
 if __name__ == '__main__':
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
