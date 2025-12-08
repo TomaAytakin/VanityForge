@@ -192,10 +192,39 @@ def generate_key_from_pin(pin, user_id):
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
+def get_sola_email_html(body_content):
+    banner_url = "https://raw.githubusercontent.com/TomaAytakin/VanityForge/main/assets/Email%20Assets/vfemailbanner.png"
+    paw_print_url = "https://raw.githubusercontent.com/TomaAytakin/VanityForge/main/assets/Email%20Assets/vfemailsig.png"
+
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+        <img src="{banner_url}" width="100%" style="border-radius: 8px 8px 0 0;" alt="VanityForge Banner">
+
+        <div style="padding: 20px; background-color: #ffffff; border: 1px solid #e0e0e0; border-top: none;">
+            {body_content}
+        </div>
+
+        <div style="padding: 20px; background-color: #f9f9f9; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px;">
+            <table style="width: 100%;">
+                <tr>
+                    <td style="width: 60px; vertical-align: middle;">
+                        <img src="{paw_print_url}" width="50" height="50" alt="Paw">
+                    </td>
+                    <td style="vertical-align: middle;">
+                        <strong style="color: #E55039; font-size: 16px;">Sola</strong> 🐼<br>
+                        <span style="color: #666; font-size: 12px;">Chief Forging Scout @ VanityForge</span><br>
+                        <a href="https://vanityforge.org" style="color: #6c5ce7; text-decoration: none; font-size: 12px;">vanityforge.org</a>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+    """
+
 def send_start_email(to_email, job_id, prefix, suffix, price, is_trial):
     try:
         msg = MIMEMultipart()
-        msg['From'] = SMTP_EMAIL
+        msg['From'] = "VanityForge Support <support@vanityforge.org>"
         msg['To'] = to_email
         msg['Subject'] = "Forge Started: Your Custom Wallet is Brewing! ⚒️"
 
@@ -208,35 +237,54 @@ def send_start_email(to_email, job_id, prefix, suffix, price, is_trial):
 
         wallet_text = " and ".join(wallet_details)
 
-        # Receipt logic
-        original_price = f"{price} SOL"
+        # Re-calculate implied value for the receipt to show correct "Original Price"
+        total_len = len(prefix or '') + len(suffix or '')
+        if total_len <= 4: base = 0.25
+        elif total_len == 5: base = 0.50
+        elif total_len == 6: base = 1.00
+        elif total_len == 7: base = 2.00
+        elif total_len == 8: base = 3.00
+        else: base = 5.00
+
+        # Current effective price (Beta 50% off)
+        effective_price = base * 0.5
+
         if is_trial:
-            discount_row = f"<tr><td>Trial Discount:</td><td>-{price} SOL</td></tr>"
-            total_paid = "0 SOL"
+            original_price_str = f"{effective_price} SOL"
+            discount_row = f"<tr><td style='padding: 5px 0; color: #636e72;'>Discount (Trial):</td><td style='text-align: right; color: #E55039;'>-{effective_price} SOL</td></tr>"
+            total_paid_str = "0 SOL"
         else:
+            # For paid jobs, price passed in is the amount paid.
+            original_price_str = f"{price} SOL"
             discount_row = ""
-            total_paid = f"{price} SOL"
+            total_paid_str = f"{price} SOL"
 
-        body = f"""
-        <html>
-        <body>
-            <p>Hey Degen! Thanks for forging with VanityForge.</p>
-            <p>We have fired up the engines for your wallet {wallet_text}.</p>
+        # Content for the body
+        content = f"""
+            <h2 style="color: #2d3436;">Hey Degen! 🐾</h2>
+            <p style="font-size: 16px; line-height: 1.5;">Sola here! We've fired up the engines for your wallet {wallet_text}.</p>
 
-            <h3>Receipt</h3>
-            <table style="border-collapse: collapse;">
-                <tr><td style="padding-right: 20px;">Original Price:</td><td>{original_price}</td></tr>
-                {discount_row}
-                <tr><td style="padding-right: 20px; font-weight: bold;">Total Paid:</td><td style="font-weight: bold;">{total_paid}</td></tr>
-            </table>
+            <div style="background-color: #f1f2f6; padding: 15px; border-radius: 6px; margin: 20px 0;">
+                <h3 style="margin-top: 0; color: #2d3436;">Receipt</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 5px 0; color: #636e72;">Original Price:</td>
+                        <td style="text-align: right; font-weight: bold;">{original_price_str}</td>
+                    </tr>
+                    {discount_row}
+                    <tr style="border-top: 1px solid #dfe6e9;">
+                        <td style="padding: 10px 0; font-weight: bold; color: #2d3436;">Total Paid:</td>
+                        <td style="padding: 10px 0; text-align: right; font-weight: bold; color: #0984e3;">{total_paid_str}</td>
+                    </tr>
+                </table>
+            </div>
 
-            <p>Sit tight. We'll ping you when it's ready.</p>
-            <p>-- The VanityForge Team</p>
-        </body>
-        </html>
+            <p style="font-size: 14px; color: #636e72;">Sit tight! I'll howl when it's ready.</p>
         """
 
-        msg.attach(MIMEText(body, 'html'))
+        full_html = get_sola_email_html(content)
+        msg.attach(MIMEText(full_html, 'html'))
+
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
@@ -249,23 +297,29 @@ def send_start_email(to_email, job_id, prefix, suffix, price, is_trial):
 def send_completion_email(to_email, job_id, public_key):
     try:
         msg = MIMEMultipart()
-        msg['From'] = SMTP_EMAIL
+        msg['From'] = "VanityForge Support <support@vanityforge.org>"
         msg['To'] = to_email
         msg['Subject'] = "Forge Complete! Your Wallet is Ready 🚀"
 
-        body = f"""
-        <html>
-        <body>
-            <p>Hey Degen! The wait is over.</p>
-            <p>Your vanity wallet has been successfully mined.</p>
-            <p><strong>Public Key:</strong> {public_key}</p>
-            <p><a href='https://vanityforge.org'>Reveal your Private Key securely here: https://vanityforge.org</a></p>
-            <p>Stay safu.<br>-- The VanityForge Team</p>
-        </body>
-        </html>
+        content = f"""
+            <h2 style="color: #2d3436;">Great news from the bamboo forest! 🎋</h2>
+            <p style="font-size: 16px; line-height: 1.5;">Your vanity wallet has been found.</p>
+
+            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #81c784;">
+                <p style="margin: 0; font-size: 12px; color: #2e7d32; text-transform: uppercase; font-weight: bold;">Public Key</p>
+                <p style="margin: 5px 0 0; font-family: monospace; font-size: 14px; word-break: break-all; color: #1b5e20;">{public_key}</p>
+            </div>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="https://vanityforge.org" style="background-color: #6c5ce7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Reveal Private Key</a>
+            </div>
+
+            <p style="font-size: 14px; color: #636e72;">Stay safu.</p>
         """
 
-        msg.attach(MIMEText(body, 'html'))
+        full_html = get_sola_email_html(content)
+        msg.attach(MIMEText(full_html, 'html'))
+
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
