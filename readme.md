@@ -51,12 +51,13 @@ The Access: When you return and type the PIN, the safe opens.
 The Risk: If you forget your PIN, no one—not even the hotel manager—can open that safe. The diamond is locked inside forever.
 
 ### For the Technical User
-Our security stack is built on **Client-Derived Server-Side Encryption** (`vm_server.py`):
-* **Ephemeral RAM Processing:** Your raw private key exists in Volatile Memory (RAM) for exactly **0.05 seconds**—just long enough to be generated and encrypted—before being overwritten and wiped.
-* **Fernet Symmetric Encryption:** We utilize the `cryptography` library to implement AES-128 encryption. The encryption key is dynamically derived from your PIN (salted and hashed) at the moment of request.
-* **Bcrypt PIN Hashing:** Your PIN is hashed using `bcrypt` before being stored for verification. We never store the raw PIN, preventing rainbow table attacks.
-* **Ciphertext Storage:** The database receives **<u>ONLY</u>** the encrypted ciphertext (`U2FsdGVk...`).
-* **Strict Isolation:** Decryption logic occurs purely server-side and *only* when triggered by a verified session with the correct PIN.
+Our security stack is built on **Client-Derived Server-Side Encryption** (`vm_server.py`) and rigorous hardening:
+* **Zero-Knowledge Architecture:** We use Fernet (AES-128) encryption with keys derived from User PINs (PBKDF2). We physically cannot decrypt your data without your input.
+* **Anti-Abuse:** Rate Limiting is implemented via `Flask-Limiter` (60 req/min) to prevent brute-force attacks.
+* **Sanitization:** Strict environment variable handling and database connection cleanup ensure no data leaks.
+* **Ephemeral RAM Processing:** Your raw private key exists in Volatile Memory (RAM) for exactly **0.05 seconds** before being wiped.
+* **Bcrypt PIN Hashing:** Your PIN is hashed using `bcrypt` before being stored.
+* **Ciphertext Storage:** The database receives **<u>ONLY</u>** the encrypted ciphertext.
 
 ---
 
@@ -71,20 +72,21 @@ Unlike browser-based generators that stop when your screen turns off, our engine
 * **Process Daemonization:** Our workers run as background daemons (`nohup`).
 * **Lifecycle Management:** You can start a job, close your browser, turn off your computer, and fly to another country. When you log back in, your job will still be grinding.
 * **Resilience:** We handle network interruptions and session disconnects gracefully. Your job state is persistent.
+* **Notifications:** **"Sola"** (our Red Panda system) sends rich HTML emails to notify you when your job starts and when it completes, so you never miss a beat.
 
 ---
 
-## 🚀 Multi-Core Optimization
+## 🏗️ System Architecture: The Hybrid Grinder
 
 ![MULTICORE](https://github.com/TomaAytakin/VanityForge/blob/main/assets/multiprocreadme.png)
 
-We don't waste a single cycle. Our engine is a **masterpiece** of efficiency and resource management.
+We utilize a smart **"Hybrid Grinder"** model to balance cost and performance, orchestrated by our central server.
 
-### The "3+1" CPU Affinity Architecture
-We have engineered a custom `multiprocessing` architecture to ensure maximum throughput without sacrificing responsiveness.
-* **The Muscle (3 Cores):** We dedicate **75% of our compute power** strictly to the grinding algorithm (utilizing `solders` and `base58` bindings for near-native Rust performance).
-* **The Brain (1 Core):** We reserve **1 dedicated vCPU** exclusively for the API, Payment Validation, and Database I/O. This guarantees that even under 100% load, the website remains snappy, payments process instantly, and you never face a timeout.
-* **CUDA CORE (2506 Core):** The next update will include the usage of cloud-run Nvidia Cuda Cores which will be 100x faster for generating wallets that requires more computational power (such as 6 letter suffixes).
+*   **Frontend:** Pure Static HTML/JS. It interacts with the backend via REST API and listens to Firestore for real-time job updates.
+*   **Backend:** A Python Flask Orchestrator (`vm_server.py`) acting as the command center.
+*   **Compute Engine:**
+    *   **Local Grinder:** For standard jobs (<5 letters), we use optimized Python Multiprocessing directly on the server.
+    *   **Cloud Grinder:** For heavy jobs (5+ letters), the system automatically dispatches containers to **Google Cloud Run**, scaling infinitely to meet demand.
 
 **VanityForge** isn't just a tool; it's a **powerhouse**.
 
@@ -120,8 +122,8 @@ We have bridged the gap between Web2 ease-of-use and Web3 native value.
 *   **Dao Governance: $VFORGE holders vote on fee structures and new features.**
 
 ## 🛠️ The Stack
-* **Infrastructure:** Google Compute Engine (Ubuntu 22.04 LTS), Firestore.
-* **Backend:** Python 3.11, Flask, Gunicorn, Multiprocessing.
+* **Infrastructure:** Google Compute Engine, Cloud Run, Firestore.
+* **Backend:** Python 3.11, Flask, Gunicorn, `Flask-Limiter`, `requests`.
 * **Frontend:** HTML5, Tailwind CSS, Firebase SDK, Solana Web3.js.
 * **Security:** `cryptography` (Fernet), `bcrypt`, `flask-cors`.
 
