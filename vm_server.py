@@ -67,6 +67,14 @@ def roadmap(): return app.send_static_file('roadmap.html')
 @app.route('/faq')
 def faq(): return app.send_static_file('faq.html')
 
+def cleanup_firestore_client(db):
+    try:
+        if db:
+            # Explicitly close the underlying gRPC channel
+            db._channel.close()
+    except Exception as e:
+        print(f"Error during client cleanup: {e}")
+
 def is_base58(s):
     if not s: return True
     return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', s))
@@ -353,7 +361,9 @@ def submit_job():
     if not prefix and not suffix: return jsonify({'error': 'Prefix/Suffix required'}), 400
     if (prefix and not is_base58(prefix)) or (suffix and not is_base58(suffix)): return jsonify({'error': 'Invalid Base58'}), 400
 
+    db = None
     try:
+        # 1. Instantiate the client (always fresh)
         db = firestore.Client(project=PROJECT_ID)
         udoc = db.collection('users').document(user_id).get()
         if not udoc.exists or not udoc.to_dict().get('pin_hash'): return jsonify({'error': 'PIN not set'}), 400
@@ -409,7 +419,12 @@ def submit_job():
         
         return jsonify({'job_id': job_id, 'message': 'Job Queued successfully'}), 202
 
-    except Exception as e: return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        # 3. CRITICAL CLEANUP: Ensure the client connection is closed immediately after use
+        cleanup_firestore_client(db)
 
 @app.route('/reveal-key', methods=['POST'])
 def reveal_key():
