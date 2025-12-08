@@ -355,17 +355,7 @@
                 await checkUserStatus(currentUser);
             } catch (error) {
                 console.error("Popup error:", error);
-                if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-                    console.warn("Popup blocked or closed, falling back to redirect...");
-                    try {
-                        await firebase.auth().signInWithRedirect(provider);
-                    } catch (redirectError) {
-                        console.error("Redirect error:", redirectError);
-                        alert("Login failed: " + redirectError.message);
-                    }
-                } else {
-                    alert("Google Login Failed: " + error.message);
-                }
+                alert("Google Login Failed: " + error.message);
             }
         }
 
@@ -658,7 +648,7 @@
                      // Use the dedicated Helius endpoint
                      // The user will replace the placeholder with their actual URL
                      // UPDATED WITH USER KEY
-                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=b9a8642a-d184-417f-91ab-efc25ab66b99", "confirmed");
+                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=REPLACE_WITH_YOUR_HELIUS_API_KEY", "confirmed");
                      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
                      // 3. Sign and Send
