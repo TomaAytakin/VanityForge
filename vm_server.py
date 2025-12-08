@@ -192,20 +192,88 @@ def generate_key_from_pin(pin, user_id):
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
-def send_completion_email(to_email, job_id, public_key):
+def send_start_email(to_email, job_id, prefix, suffix, price, is_trial):
     try:
         msg = MIMEMultipart()
         msg['From'] = SMTP_EMAIL
         msg['To'] = to_email
-        msg['Subject'] = "VanityForge Job Complete!"
-        body = f"<html><body><h2>Job Complete!</h2><p><strong>Public Key:</strong> {public_key}</p><p><a href='https://vanityforge.org'>Reveal Key</a></p></body></html>"
+        msg['Subject'] = "Forge Started: Your Custom Wallet is Brewing! ⚒️"
+
+        # Format wallet details
+        wallet_details = []
+        if suffix:
+            wallet_details.append(f"ending in <strong>{suffix}</strong>")
+        if prefix:
+            wallet_details.append(f"starting with <strong>{prefix}</strong>")
+
+        wallet_text = " and ".join(wallet_details)
+
+        # Receipt logic
+        original_price = f"{price} SOL"
+        if is_trial:
+            discount_row = f"<tr><td>Trial Discount:</td><td>-{price} SOL</td></tr>"
+            total_paid = "0 SOL"
+        else:
+            discount_row = ""
+            total_paid = f"{price} SOL"
+
+        body = f"""
+        <html>
+        <body>
+            <p>Hey Degen! Thanks for forging with VanityForge.</p>
+            <p>We have fired up the engines for your wallet {wallet_text}.</p>
+
+            <h3>Receipt</h3>
+            <table style="border-collapse: collapse;">
+                <tr><td style="padding-right: 20px;">Original Price:</td><td>{original_price}</td></tr>
+                {discount_row}
+                <tr><td style="padding-right: 20px; font-weight: bold;">Total Paid:</td><td style="font-weight: bold;">{total_paid}</td></tr>
+            </table>
+
+            <p>Sit tight. We'll ping you when it's ready.</p>
+            <p>-- The VanityForge Team</p>
+        </body>
+        </html>
+        """
+
         msg.attach(MIMEText(body, 'html'))
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
         server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
         server.quit()
-    except Exception as e: logging.exception(f"Email failed")
+        logging.info(f"Start email sent to {to_email} for job {job_id}")
+    except Exception as e:
+        logging.exception(f"Failed to send start email: {e}")
+
+def send_completion_email(to_email, job_id, public_key):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = "Forge Complete! Your Wallet is Ready 🚀"
+
+        body = f"""
+        <html>
+        <body>
+            <p>Hey Degen! The wait is over.</p>
+            <p>Your vanity wallet has been successfully mined.</p>
+            <p><strong>Public Key:</strong> {public_key}</p>
+            <p><a href='https://vanityforge.org'>Reveal your Private Key securely here: https://vanityforge.org</a></p>
+            <p>Stay safu.<br>-- The VanityForge Team</p>
+        </body>
+        </html>
+        """
+
+        msg.attach(MIMEText(body, 'html'))
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
+        server.quit()
+        logging.info(f"Completion email sent to {to_email} for job {job_id}")
+    except Exception as e:
+        logging.exception(f"Email failed")
 
 def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, email=None, notify=False):
     # DEDICATE TOTAL_GRINDING_CORES to this single worker
@@ -312,6 +380,12 @@ def scheduler_loop():
                             logging.info(f"🚦 Dispatching Cloud Job: {job_id}")
                             db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
+                            if data.get('notify') and data.get('email'):
+                                try:
+                                    send_start_email(data['email'], job_id, data.get('prefix'), data.get('suffix'), data.get('price_sol'), data.get('is_trial'))
+                                except Exception as e:
+                                    logging.error(f"Failed to send start email: {e}")
+
                             # Cleanup temp PIN for security BEFORE dispatching
                             db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
 
@@ -326,6 +400,12 @@ def scheduler_loop():
                             logging.info(f"🚦 Starting Local Job: {job_id}")
                             # Update status FIRST to reserve slot
                             db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+
+                            if data.get('notify') and data.get('email'):
+                                try:
+                                    send_start_email(data['email'], job_id, data.get('prefix'), data.get('suffix'), data.get('price_sol'), data.get('is_trial'))
+                                except Exception as e:
+                                    logging.error(f"Failed to send start email: {e}")
 
                             # Start Local Process (NOTE: pin_plain is passed securely to the worker)
                             try:
