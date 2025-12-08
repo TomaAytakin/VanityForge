@@ -13,6 +13,7 @@ import hashlib
 import math
 import requests
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify
@@ -44,8 +45,10 @@ SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL', '').strip()
 TREASURY_PUBKEY = os.getenv('TREASURY_PUBKEY', '').strip()
 SMTP_EMAIL = os.getenv('SMTP_EMAIL', '').strip()
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '').strip()
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
+os.environ.setdefault("SMTP_SERVER", "smtp.gmail.com")
+os.environ.setdefault("SMTP_PORT", "587")
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT"))
 ADMIN_EMAIL = "tomaaytakin@gmail.com"
 
 # --- QUEUE LIMITS (TRAFFIC CONTROL) ---
@@ -192,23 +195,23 @@ def generate_key_from_pin(pin, user_id):
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
-def get_sola_email_html(body_content):
-    banner_url = "https://raw.githubusercontent.com/TomaAytakin/VanityForge/main/assets/Email%20Assets/vfemailbanner.png"
-    paw_print_url = "https://raw.githubusercontent.com/TomaAytakin/VanityForge/main/assets/Email%20Assets/vfemailsig.png"
+# --- SOLA EMAIL ENGINE ---
+SOLA_BANNER = "https://raw.githubusercontent.com/TomaAytakin/VanityForge/main/assets/Email%20Assets/vfemailbanner.png"
+SOLA_PAW = "https://raw.githubusercontent.com/TomaAytakin/VanityForge/main/assets/Email%20Assets/vfemailsig.png"
 
+def get_sola_html(body):
+    """Wraps content in the Sola/Red Panda Branding"""
     return f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-        <img src="{banner_url}" width="100%" style="border-radius: 8px 8px 0 0;" alt="VanityForge Banner">
-
+        <img src="{SOLA_BANNER}" width="100%" style="border-radius: 8px 8px 0 0;" alt="VanityForge Banner">
         <div style="padding: 20px; background-color: #ffffff; border: 1px solid #e0e0e0; border-top: none;">
-            {body_content}
+            {body}
         </div>
-
         <div style="padding: 20px; background-color: #f9f9f9; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px;">
             <table style="width: 100%;">
                 <tr>
                     <td style="width: 60px; vertical-align: middle;">
-                        <img src="{paw_print_url}" width="50" height="50" alt="Paw">
+                        <img src="{SOLA_PAW}" width="50" height="50" alt="Paw">
                     </td>
                     <td style="vertical-align: middle;">
                         <strong style="color: #E55039; font-size: 16px;">Sola</strong> 🐼<br>
@@ -221,113 +224,59 @@ def get_sola_email_html(body_content):
     </div>
     """
 
+def send_email_wrapper(to_email, subject, html_content):
+    """Handles the Alias Spoofing (Login as Admin, Send as Support)"""
+    try:
+        sender_display = "VanityForge Support <support@vanityforge.org>"
+        login_email = os.getenv('SMTP_EMAIL')
+        login_password = os.getenv('SMTP_PASSWORD')
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = sender_display
+        msg['To'] = to_email
+
+        msg.attach(MIMEText(html_content, 'html'))
+
+        context = ssl.create_default_context()
+        with smtplib.SMTP(os.getenv('SMTP_SERVER'), int(os.getenv('SMTP_PORT'))) as server:
+            server.starttls(context=context)
+            server.login(login_email, login_password)
+            server.sendmail(login_email, to_email, msg.as_string())
+
+        logging.info(f"📧 Sola Email sent to {to_email}")
+        return True
+    except Exception as e:
+        logging.error(f"❌ Email Failed: {e}")
+        return False
+
 def send_start_email(to_email, job_id, prefix, suffix, price, is_trial):
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = "VanityForge Support <support@vanityforge.org>"
-        msg['To'] = to_email
-        msg['Subject'] = "Forge Started: Your Custom Wallet is Brewing! ⚒️"
+    receipt_html = f"""
+    <h2 style="color: #2d3436;">Forge Started! ⚒️</h2>
+    <p>Hey Degen! 🐾</p>
+    <p>Sola here. I've successfully dispatched your job to the grinder.</p>
+    <div style="background: #eee; padding: 10px; border-radius: 5px; margin: 15px 0;">
+        <strong>Target:</strong> ...{suffix} (or {prefix}...)<br>
+        <strong>Job ID:</strong> {job_id[:8]}...
+    </div>
+    <p>Sit tight! I'll ping you the second it's ready.</p>
+    """
+    send_email_wrapper(to_email, "Forge Started: Your Custom Wallet is Brewing! ⚒️", get_sola_html(receipt_html))
 
-        # Format wallet details
-        wallet_details = []
-        if suffix:
-            wallet_details.append(f"ending in <strong>{suffix}</strong>")
-        if prefix:
-            wallet_details.append(f"starting with <strong>{prefix}</strong>")
-
-        wallet_text = " and ".join(wallet_details)
-
-        # Re-calculate implied value for the receipt to show correct "Original Price"
-        total_len = len(prefix or '') + len(suffix or '')
-        if total_len <= 4: base = 0.25
-        elif total_len == 5: base = 0.50
-        elif total_len == 6: base = 1.00
-        elif total_len == 7: base = 2.00
-        elif total_len == 8: base = 3.00
-        else: base = 5.00
-
-        # Current effective price (Beta 50% off)
-        effective_price = base * 0.5
-
-        if is_trial:
-            original_price_str = f"{effective_price} SOL"
-            discount_row = f"<tr><td style='padding: 5px 0; color: #636e72;'>Discount (Trial):</td><td style='text-align: right; color: #E55039;'>-{effective_price} SOL</td></tr>"
-            total_paid_str = "0 SOL"
-        else:
-            # For paid jobs, price passed in is the amount paid.
-            original_price_str = f"{price} SOL"
-            discount_row = ""
-            total_paid_str = f"{price} SOL"
-
-        # Content for the body
-        content = f"""
-            <h2 style="color: #2d3436;">Hey Degen! 🐾</h2>
-            <p style="font-size: 16px; line-height: 1.5;">Sola here! We've fired up the engines for your wallet {wallet_text}.</p>
-
-            <div style="background-color: #f1f2f6; padding: 15px; border-radius: 6px; margin: 20px 0;">
-                <h3 style="margin-top: 0; color: #2d3436;">Receipt</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr>
-                        <td style="padding: 5px 0; color: #636e72;">Original Price:</td>
-                        <td style="text-align: right; font-weight: bold;">{original_price_str}</td>
-                    </tr>
-                    {discount_row}
-                    <tr style="border-top: 1px solid #dfe6e9;">
-                        <td style="padding: 10px 0; font-weight: bold; color: #2d3436;">Total Paid:</td>
-                        <td style="padding: 10px 0; text-align: right; font-weight: bold; color: #0984e3;">{total_paid_str}</td>
-                    </tr>
-                </table>
-            </div>
-
-            <p style="font-size: 14px; color: #636e72;">Sit tight! I'll howl when it's ready.</p>
-        """
-
-        full_html = get_sola_email_html(content)
-        msg.attach(MIMEText(full_html, 'html'))
-
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
-        server.quit()
-        logging.info(f"Start email sent to {to_email} for job {job_id}")
-    except Exception as e:
-        logging.exception(f"Failed to send start email: {e}")
-
-def send_completion_email(to_email, job_id, public_key):
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = "VanityForge Support <support@vanityforge.org>"
-        msg['To'] = to_email
-        msg['Subject'] = "Forge Complete! Your Wallet is Ready 🚀"
-
-        content = f"""
-            <h2 style="color: #2d3436;">Great news from the bamboo forest! 🎋</h2>
-            <p style="font-size: 16px; line-height: 1.5;">Your vanity wallet has been found.</p>
-
-            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #81c784;">
-                <p style="margin: 0; font-size: 12px; color: #2e7d32; text-transform: uppercase; font-weight: bold;">Public Key</p>
-                <p style="margin: 5px 0 0; font-family: monospace; font-size: 14px; word-break: break-all; color: #1b5e20;">{public_key}</p>
-            </div>
-
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="https://vanityforge.org" style="background-color: #6c5ce7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Reveal Private Key</a>
-            </div>
-
-            <p style="font-size: 14px; color: #636e72;">Stay safu.</p>
-        """
-
-        full_html = get_sola_email_html(content)
-        msg.attach(MIMEText(full_html, 'html'))
-
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
-        server.quit()
-        logging.info(f"Completion email sent to {to_email} for job {job_id}")
-    except Exception as e:
-        logging.exception(f"Email failed")
+def send_completion_email(to_email, public_key, private_key_enc=None):
+    success_html = f"""
+    <h2 style="color: #00b894;">Forge Complete! 🚀</h2>
+    <p>Great news from the bamboo forest! 🎋</p>
+    <p>Your custom vanity wallet has been found.</p>
+    <div style="border: 2px dashed #00b894; padding: 15px; text-align: center; margin: 20px 0;">
+        <strong>Public Key:</strong><br>
+        <code style="font-size: 14px; word-break: break-all;">{public_key}</code>
+    </div>
+    <p style="text-align: center;">
+        <a href="https://vanityforge.org" style="background-color: #6c5ce7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reveal Private Key</a>
+    </p>
+    """
+    send_email_wrapper(to_email, "Forge Complete! Your Wallet is Ready 🚀", get_sola_html(success_html))
 
 def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, email=None, notify=False):
     # DEDICATE TOTAL_GRINDING_CORES to this single worker
@@ -381,7 +330,7 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, ema
             db.collection('vanity_jobs').document(job_id).update({
                 'status': 'COMPLETED', 'public_key': found_key[0], 'secret_key': enc_key, 'completed_at': firestore.SERVER_TIMESTAMP
             })
-            if notify and email: send_completion_email(email, job_id, found_key[0])
+            if notify and email: send_completion_email(email, found_key[0])
             checkpoint_ref.delete()
 
     except Exception as e:
