@@ -44,6 +44,7 @@
                             <a href="/" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
                             <a href="/roadmap" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
                             <a href="/faq" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
+                            <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-x-twitter"></i></a>
                             <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
                         </div>
                     </div>
@@ -62,6 +63,7 @@
                 <a href="/" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">Forge</a>
                 <a href="/roadmap" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
                 <a href="/faq" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
+                <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium"><i class="fa-brands fa-x-twitter"></i> X (Twitter)</a>
                 <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">GitHub</a>
             </div>
         </div>
@@ -241,6 +243,7 @@
             // Optional: alert(error.message);
         });
         // STATE
+        const ADMIN_EMAILS = ["tomaaytakin@gmail.com", "Jonny95hidalgo@gmail.com", "admin@vanityforge.org"];
         var currentUser = null;
         var currentUserEmail = null;
         var jobListenerUnsubscribe = null;
@@ -479,7 +482,7 @@
             appInterface.classList.remove('hidden');
 
             // God Mode Check
-            if (currentUserEmail === "tomaaytakin@gmail.com") {
+            if (ADMIN_EMAILS.includes(currentUserEmail)) {
                 const titleSpan = document.querySelector('nav .text-purple-500');
                 if (titleSpan) {
                     titleSpan.innerHTML = '<i class="fa-solid fa-fire-flame-curved"></i> Welcome Dev 🛠️';
@@ -566,7 +569,7 @@
             }
 
             // Hard Limit Warning
-            if (totalLen > 5 && currentUserEmail !== "tomaaytakin@gmail.com") {
+            if (totalLen > 5 && !ADMIN_EMAILS.includes(currentUserEmail)) {
                 document.getElementById('submit-error').innerText = "Maximum 5 characters allowed in Beta.";
                 document.getElementById('submit-error').classList.remove('hidden');
                 document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = true;
@@ -643,7 +646,7 @@
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
 
             // God Mode Check
-            const isGodMode = (currentUserEmail === "tomaaytakin@gmail.com");
+            const isGodMode = ADMIN_EMAILS.includes(currentUserEmail);
             // Calculate Price & Check Payment
             const totalLen = prefix.length + suffix.length;
             // Fixed Pricing Logic
