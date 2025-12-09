@@ -502,18 +502,23 @@ def submit_job():
         # 1. Instantiate the client (always fresh)
         db = firestore.Client(project=PROJECT_ID)
 
-        # --- ACTIVE JOB CHECK ---
-        active_jobs = db.collection('vanity_jobs') \
-            .where('user_id', '==', user_id) \
-            .where('status', 'in', ['QUEUED', 'RUNNING']) \
-            .limit(1).stream()
-
-        if any(active_jobs):
-            return jsonify({'error': 'You have an active job'}), 400
-
         udoc = db.collection('users').document(user_id).get()
         if not udoc.exists or not udoc.to_dict().get('pin_hash'): return jsonify({'error': 'PIN not set'}), 400
-        if not bcrypt.checkpw(pin.encode(), udoc.to_dict().get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
+
+        user_data = udoc.to_dict()
+        is_god_mode = user_data.get('god_mode', False)
+
+        # --- ACTIVE JOB CHECK ---
+        if not is_god_mode:
+            active_jobs = db.collection('vanity_jobs') \
+                .where('user_id', '==', user_id) \
+                .where('status', 'in', ['QUEUED', 'RUNNING']) \
+                .limit(1).stream()
+
+            if any(active_jobs):
+                return jsonify({'error': 'You have an active job'}), 400
+
+        if not bcrypt.checkpw(pin.encode(), user_data.get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
         
         is_admin = (email in ADMIN_EMAILS)
         
