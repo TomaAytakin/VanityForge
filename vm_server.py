@@ -228,6 +228,7 @@ def get_sola_html(body):
 def send_email_wrapper(to_email, subject, html_content):
     """Handles the Alias Spoofing (Login as Admin, Send as Support)"""
     try:
+        # Explicitly set the 'From' header to vanity address while logging in with SMTP creds
         sender_display = "VanityForge Support <support@vanityforge.org>"
         login_email = os.getenv('SMTP_EMAIL')
         login_password = os.getenv('SMTP_PASSWORD')
@@ -243,6 +244,7 @@ def send_email_wrapper(to_email, subject, html_content):
         with smtplib.SMTP(os.getenv('SMTP_SERVER'), int(os.getenv('SMTP_PORT'))) as server:
             server.starttls(context=context)
             server.login(login_email, login_password)
+            # Send using login_email as envelope sender, but msg['From'] is displayed to user
             server.sendmail(login_email, to_email, msg.as_string())
 
         logging.info(f"📧 Sola Email sent to {to_email}")
@@ -252,13 +254,33 @@ def send_email_wrapper(to_email, subject, html_content):
         return False
 
 def send_start_email(to_email, job_id, prefix, suffix, price, is_trial):
+    # Calculate Pricing Logic for Receipt
+    total_len = len(prefix or '') + len(suffix or '')
+    if total_len <= 4: base = 0.25
+    elif total_len == 5: base = 0.50
+    elif total_len == 6: base = 1.00
+    elif total_len == 7: base = 2.00
+    elif total_len == 8: base = 3.00
+    else: base = 5.00
+
+    # Standard Beta Price is 50% of Base
+    standard_price = base * 0.5
+
+    if is_trial:
+        # Free Trial: Show strikethrough original price -> 0 SOL
+        price_display = f"<s>{standard_price} SOL</s> 0 SOL (Free Trial)"
+    else:
+        # Paid Job: Show actual paid amount
+        price_display = f"{price} SOL"
+
     receipt_html = f"""
     <h2 style="color: #2d3436;">Forge Started! ⚒️</h2>
     <p>Hey Degen! 🐾</p>
     <p>Sola here. I've successfully dispatched your job to the grinder.</p>
     <div style="background: #eee; padding: 10px; border-radius: 5px; margin: 15px 0;">
         <strong>Target:</strong> ...{suffix} (or {prefix}...)<br>
-        <strong>Job ID:</strong> {job_id[:8]}...
+        <strong>Job ID:</strong> {job_id}<br>
+        <strong>Price:</strong> {price_display}
     </div>
     <p>Sit tight! I'll ping you the second it's ready.</p>
     """
