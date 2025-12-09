@@ -49,7 +49,7 @@ os.environ.setdefault("SMTP_SERVER", "smtp.gmail.com")
 os.environ.setdefault("SMTP_PORT", "587")
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT"))
-ADMIN_EMAIL = "tomaaytakin@gmail.com"
+ADMIN_EMAILS = {"tomaaytakin@gmail.com", "Jonny95hidalgo@gmail.com", "admin@vanityforge.org"}
 
 # --- QUEUE LIMITS (TRAFFIC CONTROL) ---
 MAX_LOCAL_JOBS = 1    # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
@@ -519,7 +519,7 @@ def submit_job():
         if not udoc.exists or not udoc.to_dict().get('pin_hash'): return jsonify({'error': 'PIN not set'}), 400
         if not bcrypt.checkpw(pin.encode(), udoc.to_dict().get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
         
-        is_admin = (email == ADMIN_EMAIL)
+        is_admin = (email in ADMIN_EMAILS)
         
         # --- DETERMINE JOB TYPE (CLOUD vs LOCAL) ---
         total_len = len(prefix or '') + len(suffix or '')
