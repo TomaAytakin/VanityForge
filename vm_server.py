@@ -83,12 +83,13 @@ def roadmap(): return app.send_static_file('roadmap.html')
 def faq(): return app.send_static_file('faq.html')
 
 def cleanup_firestore_client(db):
+    """Safely closes the Firestore client connection."""
     try:
         if db:
-            # Explicitly close the underlying gRPC channel
-            db._channel.close()
-    except Exception as e:
-        logging.exception("Error during client cleanup")
+            db.close()
+    except Exception:
+        # Fail silently during cleanup to keep logs clean
+        pass
 
 def is_base58(s):
     if not s: return True
