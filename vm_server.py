@@ -368,11 +368,9 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, ema
 def scheduler_loop():
     """Background thread that checks for open slots and starts queued jobs."""
     logging.info("✅ Queue Scheduler Started")
+    db = firestore.Client(project=PROJECT_ID)
     while True:
-        db = None
         try:
-            db = firestore.Client(project=PROJECT_ID)
-            
             # 1. Count CURRENTLY running jobs
             running_cloud = 0
             running_local = 0
@@ -455,8 +453,6 @@ def scheduler_loop():
         except Exception as e:
             # The database index failure logs here.
             logging.exception(f"Scheduler Error")
-        finally:
-            cleanup_firestore_client(db)
         
         # Check queue every 5 seconds
         time.sleep(5)
