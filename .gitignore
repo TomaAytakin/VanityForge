@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 server.log
 gpu-worker/target/
+verification_env/

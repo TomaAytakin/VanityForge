@@ -108,17 +108,28 @@
 
             <p class="text-xs text-gray-500 mb-4">Note: Characters 0, O, I, and l are not allowed by Solana for security reasons.</p>
 
-            <div class="flex items-center gap-2 mb-4">
-                <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                    <input type="checkbox" name="toggle" id="case-sensitive" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
-                    <label for="case-sensitive" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
-                </div>
-                <label for="case-sensitive" class="text-sm text-gray-300 cursor-pointer select-none">Case Sensitive</label>
+            <div class="flex flex-col gap-3 mb-4">
+                <div class="flex items-center gap-2">
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="case-sensitive" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                        <label for="case-sensitive" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
+                    </div>
+                    <label for="case-sensitive" class="text-sm text-gray-300 cursor-pointer select-none">Case Sensitive</label>
 
-                <div class="ml-auto flex items-center gap-2">
-                     <input type="checkbox" id="email-notify" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
-                     <label for="email-notify" class="text-sm text-gray-300 cursor-pointer select-none">Email me when done</label>
+                    <div class="ml-auto flex items-center gap-2">
+                        <input type="checkbox" id="email-notify" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
+                        <label for="email-notify" class="text-sm text-gray-300 cursor-pointer select-none">Email me when done</label>
+                    </div>
                 </div>
+
+                <div id="gpu-option-container" class="hidden flex items-center gap-2 p-2 bg-purple-900/20 rounded border border-purple-500/30">
+                     <input type="checkbox" id="use-gpu" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
+                     <label for="use-gpu" class="text-sm text-gray-300 cursor-pointer select-none flex items-center gap-2">
+                        <i class="fa-solid fa-bolt text-yellow-400"></i>
+                        <span>Use GPU Turbo Mode (+50% Cost)</span>
+                     </label>
+                </div>
+            </div>
 
                 <style>
                     .toggle-checkbox:checked { right: 0; border-color: #9333ea; }
@@ -523,6 +534,28 @@
             const p = document.getElementById('prefix').value || "";
             const s = document.getElementById('suffix').value || "";
             const totalLen = p.length + s.length;
+
+            const gpuContainer = document.getElementById('gpu-option-container');
+            const useGpuCheckbox = document.getElementById('use-gpu');
+
+            // GPU Logic
+            if (totalLen >= 6) {
+                // Force GPU
+                gpuContainer.classList.remove('hidden');
+                useGpuCheckbox.checked = true;
+                useGpuCheckbox.disabled = true;
+                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>High-Speed GPU Forge Required</span>';
+            } else if (totalLen >= 4) {
+                // Optional GPU
+                gpuContainer.classList.remove('hidden');
+                useGpuCheckbox.disabled = false;
+                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>Use GPU Turbo Mode (+50% Cost)</span>';
+            } else {
+                // Hide
+                gpuContainer.classList.add('hidden');
+                useGpuCheckbox.checked = false;
+            }
+
             if (totalLen === 0) {
                 document.getElementById('calc-difficulty').innerText = "0 chars";
                 document.getElementById('calc-time').innerText = "Instant";
@@ -538,17 +571,36 @@
             else if (totalLen === 7) basePrice = 2.00;
             else if (totalLen === 8) basePrice = 3.00;
             else basePrice = 5.00;
-            // Apply 50% Discount
+
+            // Apply GPU Surcharge if selected (or forced)
+            if (useGpuCheckbox.checked) {
+                basePrice = basePrice * 1.5;
+            }
+
+            // Apply 50% Discount (on the final price)
             let finalPrice = basePrice * 0.5;
-            // Check Trial
+
+            // Check Trial (Only if NOT using GPU, or maybe trial allows GPU? Assuming trial is basic only usually, but let's assume trial covers cost)
+            // If user selects GPU, maybe trial doesn't apply? User requirement: "50% Beta Discount Applied".
+            // Let's assume Trial is valid for price 0, regardless of GPU selection if Length <= 4.
+            // But if they select GPU for length 4, does it cost money? "If selected, increase the calculated price by 50%."
+            // If trial makes it free, 0 * 1.5 = 0.
+
             let isTrial = false;
             if (totalLen <= 4 && userTrialsUsed < 2) {
                 isTrial = true;
                 finalPrice = 0;
             }
 
-            // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
-            let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
+            // Time Estimate
+            // Time (seconds) = (0.5 * 58^TotalLength) / Speed
+            // Speed: CPU ~5M/s, GPU ~500M/s? (Assume 100x or just significantly faster)
+            let speed = 5000000;
+            if (useGpuCheckbox.checked) {
+                speed = 500000000; // 500M/s
+            }
+
+            let seconds = (0.5 * Math.pow(58, totalLen)) / speed;
             let timeStr;
             if (seconds < 1) timeStr = "Instant";
             else if (seconds < 60) timeStr = Math.ceil(seconds) + "s";
@@ -568,17 +620,16 @@
                  costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-purple-400">${finalPrice.toFixed(2)} SOL</span>`;
             }
 
-            // Hard Limit Warning
+            // Hard Limit Warning - REMOVED for >5 because we now support it via GPU
+            /*
             if (totalLen > 5 && !ADMIN_EMAILS.includes(currentUserEmail)) {
-                document.getElementById('submit-error').innerText = "Maximum 5 characters allowed in Beta.";
-                document.getElementById('submit-error').classList.remove('hidden');
-                document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = true;
-                document.querySelector('button[onclick="startSubmissionFlow()"]').classList.add('opacity-50', 'cursor-not-allowed');
-            } else {
-                document.getElementById('submit-error').classList.add('hidden');
-                document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = false;
-                document.querySelector('button[onclick="startSubmissionFlow()"]').classList.remove('opacity-50', 'cursor-not-allowed');
+                // ...
             }
+            */
+           // Clear errors
+           document.getElementById('submit-error').classList.add('hidden');
+           document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = false;
+           document.querySelector('button[onclick="startSubmissionFlow()"]').classList.remove('opacity-50', 'cursor-not-allowed');
         }
 
         ['prefix', 'suffix'].forEach(id => {
@@ -589,6 +640,8 @@
                 updateEstimates();
             });
         });
+
+        document.getElementById('use-gpu').addEventListener('change', updateEstimates);
         // EMAIL NOTIFICATION LOGIC
         document.getElementById('email-notify').addEventListener('change', async function(e) {
             if (this.checked && !currentUserEmail) {
@@ -639,6 +692,8 @@
             const suffix = document.getElementById('suffix').value;
             const caseSensitive = document.getElementById('case-sensitive').checked;
             const notify = document.getElementById('email-notify').checked;
+            const useGpu = document.getElementById('use-gpu').checked;
+
             const errorEl = document.getElementById('submit-error');
             const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
             // Disable button
@@ -657,6 +712,12 @@
             else if (totalLen === 7) basePrice = 2.00;
             else if (totalLen === 8) basePrice = 3.00;
             else basePrice = 5.00;
+
+            // GPU Surcharge
+            if (useGpu) {
+                basePrice = basePrice * 1.5;
+            }
+
             // Apply 50% Discount
             let cost = basePrice * 0.5;
             let isTrial = (totalLen <= 4 && userTrialsUsed < 2);
@@ -733,7 +794,8 @@
                 pin: pin,
                 transaction_signature: transactionSignature,
                 email: currentUserEmail,
-                notify: notify
+                notify: notify,
+                use_gpu: useGpu
             };
             try {
                 const res = await fetch('/submit-job', {
