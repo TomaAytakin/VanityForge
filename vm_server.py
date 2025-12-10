@@ -45,6 +45,7 @@ SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL', '').strip()
 TREASURY_PUBKEY = os.getenv('TREASURY_PUBKEY', '').strip()
 SMTP_EMAIL = os.getenv('SMTP_EMAIL', '').strip()
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '').strip()
+REDPANDA_SERVICE_URL = os.getenv('REDPANDA_SERVICE_URL', '').strip()
 os.environ.setdefault("SMTP_SERVER", "smtp.gmail.com")
 os.environ.setdefault("SMTP_PORT", "587")
 SMTP_SERVER = os.getenv("SMTP_SERVER")
@@ -56,7 +57,7 @@ MAX_LOCAL_JOBS = 1    # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
 MAX_CLOUD_JOBS = 50  # Max concurrent "Hard" jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
-GPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker" # RedPanda Engine Job
+CLOUD_CPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-cpu-worker"
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -95,13 +96,13 @@ def is_base58(s):
     if not s: return True
     return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', s))
 
-# --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
-def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
-    """Triggers the remote RedPanda Engine (8 vCPU or GPU)."""
+# --- DISPATCHER LOGIC ---
+def dispatch_cloud_cpu_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
+    """Triggers the Cloud Run CPU Worker (Lane 2)."""
     try:
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(
-            name=GPU_JOB_NAME,
+            name=CLOUD_CPU_JOB_NAME,
             overrides={
                 "container_overrides": [{
                     "env": [
@@ -116,13 +117,43 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
             }
         )
         operation = client.run_job(request=request)
-        logging.info(f"🚀 Dispatched Cloud Job: {job_id}")
+        logging.info(f"🚀 Dispatched Cloud CPU Job: {job_id}")
     except Exception as e:
-        logging.exception(f"❌ Failed to dispatch Cloud job")
-        # Mark as failed in DB so user isn't stuck forever
+        logging.exception(f"❌ Failed to dispatch Cloud CPU job")
         db = firestore.Client(project=PROJECT_ID)
         try:
             db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'Cloud Dispatch Failed'})
+        finally:
+            cleanup_firestore_client(db)
+
+def dispatch_redpanda_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
+    """Triggers the RedPanda GPU Engine (Lane 3)."""
+    if not REDPANDA_SERVICE_URL:
+        logging.error("❌ RedPanda Service URL not configured")
+        return
+
+    try:
+        payload = {
+            "job_id": job_id,
+            "prefix": prefix or "",
+            "suffix": suffix or "",
+            "case_sensitive": case_sensitive,
+            "pin": pin,
+            "user_id": user_id,
+            "args": ["--gpu-index", "0"]
+        }
+        # Assuming RedPanda accepts POST with JSON
+        resp = requests.post(REDPANDA_SERVICE_URL, json=payload, timeout=5)
+        if resp.status_code == 200:
+             logging.info(f"🐼 Dispatched RedPanda Job: {job_id}")
+        else:
+             logging.error(f"❌ RedPanda Dispatch Failed: {resp.text}")
+             raise Exception(f"RedPanda Error: {resp.status_code}")
+    except Exception as e:
+        logging.exception(f"❌ Failed to dispatch RedPanda job")
+        db = firestore.Client(project=PROJECT_ID)
+        try:
+            db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'RedPanda Dispatch Failed'})
         finally:
             cleanup_firestore_client(db)
 
@@ -256,7 +287,8 @@ def send_email_wrapper(to_email, subject, html_content):
 def send_start_email(to_email, job_id, prefix, suffix, price, is_trial):
     # Calculate Pricing Logic for Receipt
     total_len = len(prefix or '') + len(suffix or '')
-    if total_len <= 4: base = 0.25
+    if total_len <= 3: base = 0.20
+    elif total_len == 4: base = 0.25
     elif total_len == 5: base = 0.50
     elif total_len == 6: base = 1.00
     elif total_len == 7: base = 2.00
@@ -387,21 +419,25 @@ def scheduler_loop():
                 try:
                     data = doc.to_dict()
                     job_id = data.get('job_id')
-                    is_cloud = data.get('is_cloud', False)
+                    worker_type = data.get('worker_type', 'vm-local-cpu') # Default to local if not set
+
+                    # Backward compatibility for old jobs (using is_cloud)
+                    if 'worker_type' not in data and data.get('is_cloud', False):
+                        # Assume Cloud CPU for old legacy jobs that were flagged as cloud
+                        worker_type = 'cloud-run-cpu'
 
                     # Retrieve the temporary PIN needed for encryption
                     pin_plain = data.get('temp_pin')
                     if not pin_plain:
-                        # Error state: Lost PIN? Fail job to clear queue
                         logging.error(f"❌ Job {job_id} missing temp_pin, marking FAILED")
                         db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': 'PIN missing in queue'})
                         continue
 
                     # --- DISPATCH LOGIC ---
-                    if is_cloud:
-                        # RULE: Cloud jobs (Paid/Hard) -> Cloud Run Queue
+                    if worker_type == 'cloud-run-gpu-redpanda' or worker_type == 'cloud-run-cpu':
+                        # RULE: Cloud jobs
                         if running_cloud < MAX_CLOUD_JOBS:
-                            logging.info(f"🚦 Dispatching Cloud Job: {job_id}")
+                            logging.info(f"🚦 Dispatching Cloud Job ({worker_type}): {job_id}")
                             db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
                             if data.get('notify') and data.get('email'):
@@ -410,19 +446,19 @@ def scheduler_loop():
                                 except Exception as e:
                                     logging.error(f"Failed to send start email: {e}")
 
-                            # Cleanup temp PIN for security BEFORE dispatching
                             db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
 
-                            # Trigger Cloud Run (AFTER security cleanup)
-                            dispatch_cloud_job(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain)
+                            if worker_type == 'cloud-run-gpu-redpanda':
+                                dispatch_redpanda_job(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain)
+                            else:
+                                dispatch_cloud_cpu_job(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain)
 
                             running_cloud += 1
 
                     else:
-                        # RULE: Local jobs (Free/Easy) -> VM Queue
+                        # RULE: Local jobs (Lane 1)
                         if running_local < MAX_LOCAL_JOBS:
                             logging.info(f"🚦 Starting Local Job: {job_id}")
-                            # Update status FIRST to reserve slot
                             db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
                             if data.get('notify') and data.get('email'):
@@ -431,7 +467,6 @@ def scheduler_loop():
                                 except Exception as e:
                                     logging.error(f"Failed to send start email: {e}")
 
-                            # Start Local Process (NOTE: pin_plain is passed securely to the worker)
                             try:
                                 p = multiprocessing.Process(target=background_grinder, args=(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain, data.get('email'), data.get('notify')))
                                 p.start()
@@ -441,7 +476,6 @@ def scheduler_loop():
                                 db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': f"Process Start Failed: {pe}"})
                                 continue
 
-                            # Cleanup temp PIN
                             db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
 
                 except Exception as e:
@@ -523,15 +557,25 @@ def submit_job():
         
         is_admin = (email in ADMIN_EMAILS)
         
-        # --- DETERMINE JOB TYPE (CLOUD vs LOCAL) ---
+        # --- DETERMINE WORKER TYPE & ROUTING ---
         total_len = len(prefix or '') + len(suffix or '')
         
-        # Automatic GPU Routing > 5
-        if total_len >= 6:
+        # Enforce GPU for 7+
+        if total_len >= 7:
             use_gpu = True
 
+        worker_type = "vm-local-cpu"
+        if total_len <= 4:
+            worker_type = "vm-local-cpu"
+        elif (total_len == 5 or total_len == 6) and not use_gpu:
+            worker_type = "cloud-run-cpu"
+        else:
+            # (total_len == 5 or 6 and GPU) OR total_len >= 7
+            worker_type = "cloud-run-gpu-redpanda"
+
         # Prices Logic
-        if total_len <= 4: base = 0.25
+        if total_len <= 3: base = 0.20
+        elif total_len == 4: base = 0.25
         elif total_len == 5: base = 0.50
         elif total_len == 6: base = 1.00
         elif total_len == 7: base = 2.00
@@ -542,7 +586,7 @@ def submit_job():
         if use_gpu:
             base = base * 1.5
         
-        # Free logic: <5 chars AND trials remaining
+        # Free logic: <5 chars AND trials remaining (Trial only for vm-local-cpu likely, but keeping logic as is: length <= 4)
         price = 0.0 if (total_len <= 4 and check_user_trials(user_id) < 2) or is_admin else base * 0.5
         
         # Hard Limit
@@ -555,14 +599,6 @@ def submit_job():
 
         job_id = str(uuid.uuid4())
         
-        # --- JOB QUEUE LOGIC ---
-        # 1. Determine "Hard" vs "Easy"
-        # Old logic: is_cloud_job = (total_len >= 5)
-        # New logic: Cloud if use_gpu is requested (len >= 6 force, len 4-5 opt-in) OR if len >= 5 (legacy fallback if somehow use_gpu not set but len=5, but we can stick to use_gpu flag mostly, except we also want to support CPU for len=5 if user opted out? The requirement says "If not selected, route to the standard CPU worker" for 4-5 chars.
-        # So: Cloud if use_gpu is True.
-
-        is_cloud_job = use_gpu
-
         # 2. Save Initial State as 'QUEUED'
         db.collection('vanity_jobs').document(job_id).set({
             'job_id': job_id, 
@@ -571,7 +607,8 @@ def submit_job():
             'suffix': suffix, 
             'case_sensitive': data.get('case_sensitive', True),
             'status': 'QUEUED', 
-            'is_cloud': is_cloud_job,
+            'worker_type': worker_type,
+            'is_cloud': (worker_type != "vm-local-cpu"),
             'temp_pin': pin,
             'created_at': firestore.SERVER_TIMESTAMP, 
             'is_trial': (price == 0), 
