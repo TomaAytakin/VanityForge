@@ -780,7 +780,7 @@
                      // Use the dedicated Helius endpoint
                      // The user will replace the placeholder with their actual URL
                      // UPDATED WITH USER KEY
-                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=REPLACE_WITH_YOUR_HELIUS_API_KEY", "confirmed");
+                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=03ad30eb-2c13-45e9-83bd-19187d14e21a", "confirmed");
                      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
                      // 3. Sign and Send
