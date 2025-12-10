@@ -166,10 +166,27 @@
         <div class="glass-panel p-8 rounded-xl shadow-lg">
             <h3 class="text-lg font-bold mb-4 text-gray-300 border-b border-gray-700 pb-2 flex items-center justify-between">
                 <span><i class="fa-solid fa-list-ul mr-2 text-purple-500"></i>Your Jobs</span>
-                <span class="text-xs font-normal text-gray-500" id="user-id-display"></span>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-normal text-gray-500" id="user-id-display"></span>
+                    <button onclick="logout()" class="text-xs text-red-400 hover:text-red-300 transition-colors" title="Logout">
+                        <i class="fa-solid fa-sign-out-alt"></i>
+                    </button>
+                </div>
             </h3>
-            <div id="jobs-container" class="space-y-4 max-h-[500px] overflow-y-auto pr-2">
-                <p class="text-center text-gray-500 italic py-8">No active jobs found.</p>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse" style="table-layout: fixed;">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-gray-700 text-xs uppercase tracking-wider">
+                             <th class="py-3 font-medium text-gray-500" style="width: 25%;">Target</th>
+                             <th class="py-3 font-medium text-gray-500" style="width: 20%;">Status</th>
+                             <th class="py-3 font-medium text-gray-500" style="width: 55%;">Details / Key</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobs-container" class="text-sm divide-y divide-gray-800">
+                        <!-- Rows injected here -->
+                    </tbody>
+                </table>
+                <div id="jobs-empty-state" class="text-center text-gray-500 italic py-8 hidden">No active jobs found.</div>
             </div>
         </div>
     </div>
@@ -830,15 +847,18 @@
         function pollJobStatus() {
             if (jobListenerUnsubscribe) jobListenerUnsubscribe();
             const container = document.getElementById('jobs-container');
+            const emptyState = document.getElementById('jobs-empty-state');
 
             jobListenerUnsubscribe = db.collection('vanity_jobs')
                 .where('user_id', '==', currentUser)
                 .orderBy('created_at', 'desc')
                 .onSnapshot((snapshot) => {
                     if (snapshot.empty) {
-                        container.innerHTML = '<p class="text-center text-gray-500 italic py-8">No active jobs found.</p>';
+                        container.innerHTML = '';
+                        emptyState.classList.remove('hidden');
                         return;
                     }
+                    emptyState.classList.add('hidden');
 
                     const fragment = document.createDocumentFragment();
 
@@ -859,19 +879,19 @@
 
                             // Show Eye Icon and Copy Button
                             resultHtml = `
-                                <div class="mt-3 bg-gray-900/50 p-3 rounded border border-gray-700/50">
+                                <div class="mt-2 bg-gray-900/50 p-2 rounded border border-gray-700/50">
                                     <div class="flex justify-between items-center mb-1">
-                                        <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Public Key</span>
+                                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Public Key</span>
                                         <button onclick="copyToClipboard('${job.public_key}')" class="text-xs text-purple-400 hover:text-purple-300 transition-colors" title="Copy Public Key"><i class="fa-regular fa-copy"></i></button>
                                     </div>
-                                    <div class="font-mono text-xs break-all text-gray-300 mb-3 bg-black/20 p-2 rounded">${job.public_key}</div>
+                                    <div class="font-mono text-[10px] break-all text-gray-300 mb-2 bg-black/20 p-1 rounded">${job.public_key}</div>
 
                                     <div class="flex justify-between items-center mb-1">
-                                        <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
+                                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
                                         <button onclick="openNumpad('reveal', 'Enter PIN to Unlock', revealKey, '${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
                                     </div>
                                     <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
-                                        <div id="key-text-${doc.id}" class="font-mono text-xs break-all text-red-300 bg-red-900/10 p-2 rounded border border-red-900/20 flex-grow">
+                                        <div id="key-text-${doc.id}" class="font-mono text-[10px] break-all text-red-300 bg-red-900/10 p-1 rounded border border-red-900/20 flex-grow">
                                             </div>
                                         <button onclick="copyKey('${doc.id}')" class="text-gray-400 hover:text-white pt-1 transition-colors" title="Copy Private Key"><i class="fa-regular fa-copy"></i></button>
                                     </div>
@@ -881,8 +901,8 @@
                             statusColor = 'text-red-400';
                             statusIcon = '<i class="fa-solid fa-times-circle"></i>';
                             resultHtml = `
-                                <div class="mt-2 text-xs text-red-400 italic">
-                                    ${job.error || "Job failed to process."}
+                                <div class="mt-1 text-[10px] text-red-400 italic">
+                                    ${job.error || "Job failed."}
                                 </div>
                             `;
                         } else {
@@ -890,24 +910,28 @@
                             statusIcon = '<i class="fa-regular fa-clock animate-spin"></i>';
                         }
 
-                        const el = document.createElement('div');
-                        el.className = "bg-gray-800 p-4 rounded-lg border border-gray-700 shadow-sm hover:border-gray-600 transition-colors";
-                        el.innerHTML = `
-                            <div class="flex justify-between items-start mb-2">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-xs font-bold bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600 font-mono">
+                        const tr = document.createElement('tr');
+                        tr.className = "hover:bg-gray-800/50 transition-colors align-top";
+                        tr.innerHTML = `
+                            <td class="py-3 pr-2 border-b border-gray-800">
+                                <div class="flex flex-col gap-1">
+                                    <span class="text-xs font-bold bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600 font-mono w-max">
                                         ${job.prefix || '...'}-${job.suffix || '...'}
                                     </span>
-                                    ${job.case_sensitive ? '<span class="text-xs text-purple-400 border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 rounded" title="Case Sensitive">Aa</span>' : ''}
+                                    ${job.case_sensitive ? '<span class="text-[10px] text-purple-400 w-max border border-purple-500/30 bg-purple-500/10 px-1 py-0.5 rounded" title="Case Sensitive">Case Sensitive</span>' : ''}
+                                    <span class="text-[10px] text-gray-600 font-mono uppercase tracking-widest">ID: ${doc.id.slice(0, 8)}...</span>
                                 </div>
-                                <span class="text-sm font-bold ${statusColor} capitalize flex items-center gap-1">
+                            </td>
+                            <td class="py-3 pr-2 border-b border-gray-800">
+                                <span class="text-xs font-bold ${statusColor} capitalize flex items-center gap-1">
                                     ${statusIcon} ${job.status}
                                 </span>
-                            </div>
-                            <div class="text-[10px] text-gray-600 mb-1 font-mono uppercase tracking-widest">ID: ${doc.id}</div>
-                            ${resultHtml}
+                            </td>
+                            <td class="py-3 border-b border-gray-800">
+                                ${resultHtml}
+                            </td>
                         `;
-                        fragment.appendChild(el);
+                        fragment.appendChild(tr);
                     });
 
                     container.innerHTML = '';
@@ -915,8 +939,28 @@
 
                 }, (error) => {
                     console.error("Error polling jobs:", error);
-                    container.innerHTML = '<p class="text-center text-red-500 py-4 bg-red-900/10 rounded border border-red-900/20">Error connection to job server.</p>';
+                    emptyState.innerText = 'Error connecting to job server.';
+                    emptyState.classList.remove('hidden');
                 });
+        }
+
+        function logout() {
+            if (jobListenerUnsubscribe) jobListenerUnsubscribe();
+            firebase.auth().signOut().then(() => {
+                currentUser = null;
+                currentUserEmail = null;
+                document.getElementById('app-interface').classList.add('hidden');
+                document.getElementById('auth-section').classList.remove('hidden');
+                // Hide mobile menu if open
+                const mobileMenu = document.getElementById('mobile-menu');
+                if (mobileMenu && !mobileMenu.classList.contains('hidden')) {
+                    mobileMenu.classList.add('hidden');
+                }
+                const titleSpan = document.querySelector('nav .text-purple-500');
+                if (titleSpan) titleSpan.innerHTML = '<i class="fa-solid fa-fire-flame-curved"></i> VanityForge';
+            }).catch((error) => {
+                console.error("Sign Out Error", error);
+            });
         }
 
         async function revealKey(jobId, pin) {
