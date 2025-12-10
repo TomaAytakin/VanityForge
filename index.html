@@ -539,19 +539,19 @@
             const useGpuCheckbox = document.getElementById('use-gpu');
 
             // GPU Logic
-            if (totalLen >= 6) {
-                // Force GPU
+            if (totalLen >= 7) {
+                // Force GPU (Lane 3)
                 gpuContainer.classList.remove('hidden');
                 useGpuCheckbox.checked = true;
                 useGpuCheckbox.disabled = true;
-                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>High-Speed GPU Forge Required</span>';
-            } else if (totalLen >= 4) {
-                // Optional GPU
+                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>RedPanda GPU Required</span>';
+            } else if (totalLen >= 5) {
+                // Optional GPU (Lane 2 or 3)
                 gpuContainer.classList.remove('hidden');
                 useGpuCheckbox.disabled = false;
-                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>Use GPU Turbo Mode (+50% Cost)</span>';
+                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>Enable GPU Turbo (+50% Cost)</span>';
             } else {
-                // Hide
+                // Hide (Lane 1)
                 gpuContainer.classList.add('hidden');
                 useGpuCheckbox.checked = false;
             }
@@ -565,7 +565,8 @@
 
             // Fixed Pricing Logic
             let basePrice = 0;
-            if (totalLen <= 4) basePrice = 0.25;
+            if (totalLen <= 3) basePrice = 0.20;
+            else if (totalLen === 4) basePrice = 0.25;
             else if (totalLen === 5) basePrice = 0.50;
             else if (totalLen === 6) basePrice = 1.00;
             else if (totalLen === 7) basePrice = 2.00;
@@ -594,10 +595,19 @@
 
             // Time Estimate
             // Time (seconds) = (0.5 * 58^TotalLength) / Speed
-            // Speed: CPU ~5M/s, GPU ~500M/s? (Assume 100x or just significantly faster)
+            // Speed: Local CPU ~5M/s, Cloud CPU ~5M/s, RedPanda GPU ~500M/s?
             let speed = 5000000;
-            if (useGpuCheckbox.checked) {
-                speed = 500000000; // 500M/s
+            let method = "(CPU)";
+
+            if (totalLen <= 4) {
+                 speed = 5000000; // Local VM
+                 method = "(Local CPU)";
+            } else if (useGpuCheckbox.checked || totalLen >= 7) {
+                 speed = 500000000; // RedPanda GPU (Lane 3)
+                 method = "(RedPanda GPU)";
+            } else {
+                 speed = 5000000; // Cloud CPU (Lane 2)
+                 method = "(Cloud CPU)";
             }
 
             let seconds = (0.5 * Math.pow(58, totalLen)) / speed;
@@ -609,15 +619,21 @@
             else timeStr = (seconds/86400).toFixed(1) + "d";
 
             document.getElementById('calc-difficulty').innerText = totalLen + " chars";
-            document.getElementById('calc-time').innerText = timeStr;
+            document.getElementById('calc-time').innerText = timeStr + " " + method;
 
             const costEl = document.getElementById('calc-cost');
             if (isTrial) {
                  // Trial UI: <del>0.25 SOL</del> FREE (Trial)
                  costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-green-400">FREE (Trial)</span>`;
             } else {
-                 // Discount UI: <del>1.0 SOL</del> 0.5 SOL
-                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-purple-400">${finalPrice.toFixed(2)} SOL</span>`;
+                 // Discount UI: <del>STANDARD</del> BETA_PRICE
+                 // We want to show the original Standard price (which is basePrice here, assuming basePrice represents the standard rate before discount)
+                 // Wait, basePrice is calculated based on length. The requirement says:
+                 // 1-3 Characters: Standard 0.20 -> Pay 0.10
+                 // My code has basePrice = 0.20 for <=3.
+                 // And finalPrice = basePrice * 0.5 = 0.10.
+                 // So displaying basePrice as struck-through is correct.
+                 costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-purple-400 font-bold">${finalPrice.toFixed(2)} SOL (Beta)</span>`;
             }
 
             // Hard Limit Warning - REMOVED for >5 because we now support it via GPU
@@ -705,7 +721,8 @@
             const totalLen = prefix.length + suffix.length;
             // Fixed Pricing Logic
             let basePrice = 0;
-            if (totalLen <= 4) basePrice = 0.25;
+            if (totalLen <= 3) basePrice = 0.20;
+            else if (totalLen === 4) basePrice = 0.25;
             else if (totalLen === 5) basePrice = 0.50;
             else if (totalLen === 6) basePrice = 1.00;
             else if (totalLen === 7) basePrice = 2.00;
