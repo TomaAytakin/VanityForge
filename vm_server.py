@@ -424,11 +424,11 @@ def scheduler_loop():
 
                             # Trigger Cloud Run (AFTER security cleanup)
                             dispatch_cloud_job(
-                                job_id,
-                                data.get('user_id'),
-                                data.get('prefix'),
-                                data.get('suffix'),
-                                data.get('case_sensitive', True),
+                                job_id, 
+                                data.get('user_id'), 
+                                data.get('prefix'), 
+                                data.get('suffix'), 
+                                data.get('case_sensitive', True), 
                                 pin_plain,
                                 data.get('worker_type', 'cloud-run-cpu') # Default to CPU if missing
                             )
@@ -524,10 +524,14 @@ def submit_job():
         if not udoc.exists or not udoc.to_dict().get('pin_hash'): return jsonify({'error': 'PIN not set'}), 400
 
         user_data = udoc.to_dict()
-        is_god_mode = user_data.get('god_mode', False)
+        
+        # --- START ADMIN BYPASS FIX ---
+        is_admin_email = email in ADMIN_EMAILS # Check if the submitted email is an admin
+        is_god_mode = user_data.get('god_mode', False) or is_admin_email # If DB flag OR admin email, activate god mode
+        # --- END ADMIN BYPASS FIX ---
 
         # --- ACTIVE JOB CHECK ---
-        if not is_god_mode:
+        if not is_god_mode: # ADMINS NOW BYPASS THIS CHECK
             active_jobs = db.collection('vanity_jobs') \
                 .where('user_id', '==', user_id) \
                 .where('status', 'in', ['QUEUED', 'RUNNING']) \
