@@ -917,12 +917,12 @@
                         tr.className = "hover:bg-gray-800/50 transition-colors align-top";
                         tr.innerHTML = `
                             <td class="py-3 pr-2 border-b border-gray-800">
-                                <div class="flex flex-col gap-1">
-                                    <span class="text-xs font-bold bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600 font-mono w-max">
-                                        ${job.prefix || '...'}-${job.suffix || '...'}
-                                    </span>
-                                    ${job.case_sensitive ? '<span class="text-[10px] text-purple-400 w-max border border-purple-500/30 bg-purple-500/10 px-1 py-0.5 rounded" title="Case Sensitive">Case Sensitive</span>' : ''}
-                                    <span class="text-[10px] text-gray-600 font-mono uppercase tracking-widest">ID: ${doc.id.slice(0, 8)}...</span>
+                                <div class="font-bold text-gray-200 font-mono text-sm break-all mb-1">
+                                    ${job.prefix || '...'}-${job.suffix || '...'}
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                     <span class="text-[10px] text-gray-500 font-mono">#${doc.id.slice(0, 8)}</span>
+                                     ${job.case_sensitive ? '<span class="text-[10px] text-purple-400 border border-purple-500/30 bg-purple-500/10 px-1 rounded" title="Case Sensitive">Case</span>' : ''}
                                 </div>
                             </td>
                             <td class="py-3 pr-2 border-b border-gray-800">
