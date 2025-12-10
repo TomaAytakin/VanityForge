@@ -5,6 +5,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import base64
 import hashlib
+import sys
+import time
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -67,7 +69,7 @@ if __name__ == "__main__":
 
     if not TASK_JOB_ID or not TASK_PIN or not TASK_USER_ID:
         print("Missing required environment variables: TASK_JOB_ID, TASK_PIN, TASK_USER_ID")
-        exit(1)
+        sys.exit(1)
 
     # Parse case sensitive boolean from string
     case_sensitive = str(TASK_CASE).lower() == 'true'
@@ -85,14 +87,29 @@ if __name__ == "__main__":
             key = generate_key_from_pin(TASK_PIN, TASK_USER_ID)
             enc_key = Fernet(key).encrypt(secret.encode()).decode()
 
-            # Update Firestore job status to 'COMPLETED' with the result
-            job_ref.update({
-                'status': 'COMPLETED',
-                'public_key': address,
-                'secret_key': enc_key,
-                'completed_at': firestore.SERVER_TIMESTAMP
-            })
-            print(f"Job {TASK_JOB_ID} completed successfully. Address: {address}")
+            # Retry loop for Firestore update
+            success = False
+            for attempt in range(5):
+                try:
+                    # Update Firestore job status to 'COMPLETED' with the result
+                    job_ref.update({
+                        'status': 'COMPLETED',
+                        'public_key': address,
+                        'secret_key': enc_key,
+                        'completed_at': firestore.SERVER_TIMESTAMP
+                    })
+                    print("INFO: FOUND_KEY_UPDATE_SUCCESS")
+                    print(f"Job {TASK_JOB_ID} completed successfully. Address: {address}")
+                    success = True
+                    break
+                except Exception as update_err:
+                    print(f"Warning: Firestore update failed (attempt {attempt+1}/5): {update_err}")
+                    time.sleep(2 ** attempt) # Exponential backoff
+
+            if not success:
+                print("ERROR: FIRESTORE_UPDATE_FAILED")
+                sys.exit(1)
+
         else:
             print("Failed to generate address.")
             job_ref.update({'status': 'FAILED', 'error': 'Worker failed to generate address'})
@@ -103,3 +120,5 @@ if __name__ == "__main__":
             db.collection('vanity_jobs').document(TASK_JOB_ID).update({'status': 'FAILED', 'error': str(e)})
         except:
             pass
+        # Exit with error code so Cloud Run (or caller) knows something went wrong
+        sys.exit(1)
