@@ -13,8 +13,7 @@ WORKDIR /app
 COPY . /app
 
 # Build the CUDA application
-# Using generic architecture flags compatible with L4 (Ada Lovelace, sm_89) and others
-RUN nvcc -o solanity main.cu -O3 --generate-code arch=compute_89,code=sm_89 --generate-code arch=compute_75,code=sm_75 --generate-code arch=compute_80,code=sm_80
+RUN make
 
 # Set entry point
 ENTRYPOINT ["./solanity"]

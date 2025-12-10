@@ -12,6 +12,9 @@
 #include "fixedint.h"
 #include "sha512.h"
 
+#ifndef SHA512_CU
+#define SHA512_CU
+
 #ifdef __CUDA_ARCH__
 #define K_DEF __device__
 #else
@@ -278,3 +281,5 @@ int sha512(const unsigned char *message, size_t message_len, unsigned char *out)
     if ((ret = sha512_final(&ctx, out))) return ret;
     return 0;
 }
+
+#endif

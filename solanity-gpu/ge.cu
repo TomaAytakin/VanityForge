@@ -1,6 +1,8 @@
 #include "ge.h"
 #include "precomp_data.h"
 
+#ifndef GE_CU
+#define GE_CU
 
 /*
 r = p + q
@@ -465,3 +467,5 @@ void __host__ __device__ ge_tobytes(unsigned char *s, const ge_p2 *h) {
     fe_tobytes(s, y);
     s[31] ^= fe_isnegative(x) << 7;
 }
+
+#endif

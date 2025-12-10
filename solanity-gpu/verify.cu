@@ -1,3 +1,6 @@
+#ifndef VERIFY_CU
+#define VERIFY_CU
+
 #include "sha512.h"
 #include <algorithm>
 #include <stdio.h>
@@ -225,3 +228,5 @@ int cuda_host_register(void* ptr, size_t size, unsigned int flags) {
 int cuda_host_unregister(void* ptr) {
    return cudaHostUnregister(ptr);
 }
+
+#endif
