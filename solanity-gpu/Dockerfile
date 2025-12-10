@@ -1,10 +1,12 @@
 FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
 
-# Install build tools
+# Install build tools and Python
 RUN apt-get update && apt-get install -y \
     gcc \
     make \
     git \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -15,5 +17,8 @@ COPY . /app
 # Build the CUDA application
 RUN make
 
-# Set entry point
-ENTRYPOINT ["./solanity"]
+# Install Python requirements
+RUN pip3 install -r requirements.txt --break-system-packages
+
+# Set entry point to Python wrapper
+ENTRYPOINT ["python3", "worker.py"]
