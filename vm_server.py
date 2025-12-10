@@ -56,7 +56,7 @@ MAX_LOCAL_JOBS = 1    # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
 MAX_CLOUD_JOBS = 50  # Max concurrent "Hard" jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
-GPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker"
+GPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker" # RedPanda Engine Job
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -97,7 +97,7 @@ def is_base58(s):
 
 # --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
 def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
-    """Triggers the remote Cloud Run Job (8 vCPU or GPU)."""
+    """Triggers the remote RedPanda Engine (8 vCPU or GPU)."""
     try:
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(

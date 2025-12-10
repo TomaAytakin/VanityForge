@@ -86,7 +86,7 @@ We utilize a smart **"Hybrid Grinder"** model to balance cost and performance, o
 *   **Backend:** A Python Flask Orchestrator (`vm_server.py`) acting as the command center.
 *   **Compute Engine:**
     *   **Local Grinder:** For standard jobs (<5 letters), we use optimized Python Multiprocessing directly on the server.
-    *   **Cloud Grinder:** For heavy jobs (5+ letters), the system automatically dispatches containers to **Google Cloud Run**, scaling infinitely to meet demand.
+    *   **RedPanda Engine:** For heavy jobs (5+ letters), the system automatically dispatches containers to **Google Cloud Run**, utilizing the high-performance RedPanda Engine to grind 58^6 combinations in minutes.
 
 **VanityForge** isn't just a tool; it's a **powerhouse**.
 
@@ -117,7 +117,7 @@ We have bridged the gap between Web2 ease-of-use and Web3 native value.
 *   **Expand capacity to 8-Core 'Fast Track' nodes.**
 
 ### Phase 3: The Singularity (FUTURE 🔮)
-*   **GPU Acceleration: Migrate to NVIDIA CUDA cores for 100x speed.**
+*   **RedPanda Engine: Migrate to NVIDIA CUDA cores for 100x speed.**
 *   **Instant Forge: Sub-minute delivery for 7-character vanity addresses.**
 *   **Dao Governance: $VFORGE holders vote on fee structures and new features.**
 
