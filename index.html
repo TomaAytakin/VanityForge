@@ -163,7 +163,7 @@
             <p id="submit-error" class="text-red-400 text-sm mt-3 text-center hidden bg-red-900/20 py-2 rounded border border-red-900/50"></p>
         </div>
 
-        <div class="glass-panel p-8 rounded-xl shadow-lg">
+        <div id="job-queue-section" class="glass-panel p-8 rounded-xl shadow-lg hidden">
             <h3 class="text-lg font-bold mb-4 text-gray-300 border-b border-gray-700 pb-2 flex items-center justify-between">
                 <span><i class="fa-solid fa-list-ul mr-2 text-purple-500"></i>Your Jobs</span>
                 <div class="flex items-center gap-3">
@@ -174,9 +174,11 @@
                 </div>
             </h3>
             <div class="overflow-x-auto">
+                <!-- Job Queue Table: Fixed Layout -->
                 <table class="w-full text-left border-collapse" style="table-layout: fixed;">
                     <thead>
                         <tr class="text-gray-400 border-b border-gray-700 text-xs uppercase tracking-wider">
+                             <!-- Fixed Column Widths -->
                              <th class="py-3 font-medium text-gray-500" style="width: 25%;">Target</th>
                              <th class="py-3 font-medium text-gray-500" style="width: 20%;">Status</th>
                              <th class="py-3 font-medium text-gray-500" style="width: 55%;">Details / Key</th>
@@ -508,6 +510,7 @@
             document.getElementById('auth-section').classList.add('hidden');
             const appInterface = document.getElementById('app-interface');
             appInterface.classList.remove('hidden');
+            document.getElementById('job-queue-section').classList.remove('hidden');
 
             // God Mode Check
             if (ADMIN_EMAILS.includes(currentUserEmail)) {
@@ -950,6 +953,7 @@
                 currentUser = null;
                 currentUserEmail = null;
                 document.getElementById('app-interface').classList.add('hidden');
+                document.getElementById('job-queue-section').classList.add('hidden');
                 document.getElementById('auth-section').classList.remove('hidden');
                 // Hide mobile menu if open
                 const mobileMenu = document.getElementById('mobile-menu');
