@@ -14,6 +14,7 @@
 #include "fixedint.h"
 #include "gpu_common.h"
 #include "gpu_ctx.h"
+#include "gpu_ctx.cu"
 
 // Include implementation files directly as in original vanity.cu
 #include "keypair.cu"
