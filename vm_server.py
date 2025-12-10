@@ -56,7 +56,8 @@ MAX_LOCAL_JOBS = 1    # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
 MAX_CLOUD_JOBS = 50  # Max concurrent "Hard" jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
-GPU_JOB_NAME = f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker" # RedPanda Engine Job
+REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker")
+CPU_JOB_NAME = os.getenv('CPU_JOB_NAME', f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-cpu-worker")
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -96,12 +97,20 @@ def is_base58(s):
     return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', s))
 
 # --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
-def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
-    """Triggers the remote RedPanda Engine (8 vCPU or GPU)."""
+def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin, worker_type):
+    """Triggers the remote Cloud Run Job (CPU or GPU)."""
     try:
+        # Determine Target Job
+        if worker_type == "cloud-run-gpu-redpanda":
+            target_job = REDPANDA_JOB_NAME
+            logging.info("🏎️ Dispatching to RedPanda GPU Lane")
+        else:
+            target_job = CPU_JOB_NAME
+            logging.info("🚙 Dispatching to Standard CPU Lane")
+
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(
-            name=GPU_JOB_NAME,
+            name=target_job,
             overrides={
                 "container_overrides": [{
                     "env": [
@@ -414,7 +423,15 @@ def scheduler_loop():
                             db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
 
                             # Trigger Cloud Run (AFTER security cleanup)
-                            dispatch_cloud_job(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain)
+                            dispatch_cloud_job(
+                                job_id,
+                                data.get('user_id'),
+                                data.get('prefix'),
+                                data.get('suffix'),
+                                data.get('case_sensitive', True),
+                                pin_plain,
+                                data.get('worker_type', 'cloud-run-cpu') # Default to CPU if missing
+                            )
 
                             running_cloud += 1
 
@@ -556,12 +573,16 @@ def submit_job():
         job_id = str(uuid.uuid4())
         
         # --- JOB QUEUE LOGIC ---
-        # 1. Determine "Hard" vs "Easy"
-        # Old logic: is_cloud_job = (total_len >= 5)
-        # New logic: Cloud if use_gpu is requested (len >= 6 force, len 4-5 opt-in) OR if len >= 5 (legacy fallback if somehow use_gpu not set but len=5, but we can stick to use_gpu flag mostly, except we also want to support CPU for len=5 if user opted out? The requirement says "If not selected, route to the standard CPU worker" for 4-5 chars.
-        # So: Cloud if use_gpu is True.
-
-        is_cloud_job = use_gpu
+        # Determine Worker Type & Cloud Status
+        if use_gpu:
+            worker_type = "cloud-run-gpu-redpanda"
+            is_cloud_job = True
+        elif total_len >= 5:
+            worker_type = "cloud-run-cpu"
+            is_cloud_job = True
+        else:
+            worker_type = "local-cpu"
+            is_cloud_job = False
 
         # 2. Save Initial State as 'QUEUED'
         db.collection('vanity_jobs').document(job_id).set({
@@ -572,6 +593,7 @@ def submit_job():
             'case_sensitive': data.get('case_sensitive', True),
             'status': 'QUEUED', 
             'is_cloud': is_cloud_job,
+            'worker_type': worker_type,
             'temp_pin': pin,
             'created_at': firestore.SERVER_TIMESTAMP, 
             'is_trial': (price == 0), 
