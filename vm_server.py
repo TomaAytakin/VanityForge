@@ -492,6 +492,7 @@ def submit_job():
     prefix, suffix = data.get('prefix'), data.get('suffix', '')
     pin, tx_sig = data.get('pin'), data.get('transaction_signature')
     email, notify = data.get('email'), data.get('notify', False)
+    use_gpu = data.get('use_gpu', False)
     
     if not user_id or not pin: return jsonify({'error': 'Missing ID or PIN'}), 400
     if not prefix and not suffix: return jsonify({'error': 'Prefix/Suffix required'}), 400
@@ -525,6 +526,10 @@ def submit_job():
         # --- DETERMINE JOB TYPE (CLOUD vs LOCAL) ---
         total_len = len(prefix or '') + len(suffix or '')
         
+        # Automatic GPU Routing > 5
+        if total_len >= 6:
+            use_gpu = True
+
         # Prices Logic
         if total_len <= 4: base = 0.25
         elif total_len == 5: base = 0.50
@@ -532,6 +537,10 @@ def submit_job():
         elif total_len == 7: base = 2.00
         elif total_len == 8: base = 3.00
         else: base = 5.00
+
+        # GPU Surcharge
+        if use_gpu:
+            base = base * 1.5
         
         # Free logic: <5 chars AND trials remaining
         price = 0.0 if (total_len <= 4 and check_user_trials(user_id) < 2) or is_admin else base * 0.5
@@ -548,7 +557,11 @@ def submit_job():
         
         # --- JOB QUEUE LOGIC ---
         # 1. Determine "Hard" vs "Easy"
-        is_cloud_job = (total_len >= 5) 
+        # Old logic: is_cloud_job = (total_len >= 5)
+        # New logic: Cloud if use_gpu is requested (len >= 6 force, len 4-5 opt-in) OR if len >= 5 (legacy fallback if somehow use_gpu not set but len=5, but we can stick to use_gpu flag mostly, except we also want to support CPU for len=5 if user opted out? The requirement says "If not selected, route to the standard CPU worker" for 4-5 chars.
+        # So: Cloud if use_gpu is True.
+
+        is_cloud_job = use_gpu
 
         # 2. Save Initial State as 'QUEUED'
         db.collection('vanity_jobs').document(job_id).set({
