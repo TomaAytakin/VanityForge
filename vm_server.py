@@ -526,8 +526,8 @@ def submit_job():
         user_data = udoc.to_dict()
         
         # --- START ADMIN BYPASS FIX ---
-        is_admin_email = email in ADMIN_EMAILS # Check if the submitted email is an admin
-        is_god_mode = user_data.get('god_mode', False) or is_admin_email # If DB flag OR admin email, activate god mode
+        is_admin_email = email in ADMIN_EMAILS
+        is_god_mode = user_data.get('god_mode', False) or is_admin_email
         # --- END ADMIN BYPASS FIX ---
 
         # --- ACTIVE JOB CHECK ---
