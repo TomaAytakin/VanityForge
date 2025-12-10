@@ -21,6 +21,7 @@
 #include "fe.cu"
 #include "ge.cu"
 #include "sha512.cu"
+#include "verify.cu"
 
 // Constants replacing config.h
 #define MAX_ITERATIONS 2000000000

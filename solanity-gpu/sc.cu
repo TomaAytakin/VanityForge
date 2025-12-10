@@ -2,6 +2,9 @@
 #include "sc.h"
 #include "common.cu"
 
+#ifndef SC_CU
+#define SC_CU
+
 /*
 Input:
   s[0]+256*s[1]+...+256^63*s[63] = s
@@ -710,49 +713,6 @@ void __host__ __device__ sc_muladd(unsigned char *s, const unsigned char *a, con
     carry10 = s10 >> 21;
     s11 += carry10;
     s10 -= carry10 << 21;
-    carry11 = s11 >> 21;
-    s12 += carry11;
-    s11 -= carry11 << 21;
-    s0 += s12 * 666643;
-    s1 += s12 * 470296;
-    s2 += s12 * 654183;
-    s3 -= s12 * 997805;
-    s4 += s12 * 136657;
-    s5 -= s12 * 683901;
-    s12 = 0;
-    carry0 = s0 >> 21;
-    s1 += carry0;
-    s0 -= carry0 << 21;
-    carry1 = s1 >> 21;
-    s2 += carry1;
-    s1 -= carry1 << 21;
-    carry2 = s2 >> 21;
-    s3 += carry2;
-    s2 -= carry2 << 21;
-    carry3 = s3 >> 21;
-    s4 += carry3;
-    s3 -= carry3 << 21;
-    carry4 = s4 >> 21;
-    s5 += carry4;
-    s4 -= carry4 << 21;
-    carry5 = s5 >> 21;
-    s6 += carry5;
-    s5 -= carry5 << 21;
-    carry6 = s6 >> 21;
-    s7 += carry6;
-    s6 -= carry6 << 21;
-    carry7 = s7 >> 21;
-    s8 += carry7;
-    s7 -= carry7 << 21;
-    carry8 = s8 >> 21;
-    s9 += carry8;
-    s8 -= carry8 << 21;
-    carry9 = s9 >> 21;
-    s10 += carry9;
-    s9 -= carry9 << 21;
-    carry10 = s10 >> 21;
-    s11 += carry10;
-    s10 -= carry10 << 21;
 
     s[0] = (unsigned char) (s0 >> 0);
     s[1] = (unsigned char) (s0 >> 8);
@@ -787,3 +747,5 @@ void __host__ __device__ sc_muladd(unsigned char *s, const unsigned char *a, con
     s[30] = (unsigned char) (s11 >> 9);
     s[31] = (unsigned char) (s11 >> 17);
 }
+
+#endif

@@ -1,3 +1,6 @@
+#ifndef SIGN_CU
+#define SIGN_CU
+
 #include "ed25519.h"
 #include "sha512.h"
 #include "ge.h"
@@ -143,3 +146,5 @@ void ed25519_sign_many(const gpu_Elems* elems,
 
     release_gpu_ctx(gpu_ctx);
 }
+
+#endif

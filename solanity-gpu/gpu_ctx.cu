@@ -1,3 +1,6 @@
+#ifndef GPU_CTX_CU
+#define GPU_CTX_CU
+
 #include "ed25519.h"
 #include "gpu_ctx.h"
 #include <pthread.h>
@@ -159,3 +162,5 @@ void ed25519_free_gpu_mem() {
         }
     }
 }
+
+#endif
