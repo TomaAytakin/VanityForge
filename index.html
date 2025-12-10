@@ -698,7 +698,6 @@
             const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
             // Disable button
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
 
             // God Mode Check
             const isGodMode = ADMIN_EMAILS.includes(currentUserEmail);
@@ -716,6 +715,9 @@
             // GPU Surcharge
             if (useGpu) {
                 basePrice = basePrice * 1.5;
+                submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing RedPanda Engine...';
+            } else {
+                submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
             }
 
             // Apply 50% Discount
