@@ -98,6 +98,8 @@ if __name__ == "__main__":
                         'secret_key': enc_key,
                         'completed_at': firestore.SERVER_TIMESTAMP
                     })
+                    # Force a synchronous blocking read to ensure data is committed before exiting
+                    job_ref.get()
                     print("INFO: FOUND_KEY_UPDATE_SUCCESS")
                     print(f"Job {TASK_JOB_ID} completed successfully. Address: {address}")
                     success = True
