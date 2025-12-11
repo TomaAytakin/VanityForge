@@ -56,8 +56,8 @@ MAX_LOCAL_JOBS = 1    # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
 MAX_CLOUD_JOBS = 50  # Max concurrent "Hard" jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
-REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker")
-CPU_JOB_NAME = os.getenv('CPU_JOB_NAME', f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-cpu-worker")
+REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', f"projects/{PROJECT_ID}/locations/us-central1/jobs/vanity-gpu-redpanda")
+CPU_JOB_NAME = os.getenv('CPU_JOB_NAME', f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker")
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
