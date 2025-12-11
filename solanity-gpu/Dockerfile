@@ -18,7 +18,7 @@ COPY . /app
 RUN make
 
 # Install Python requirements
-RUN pip3 install -r requirements.txt --break-system-packages
+RUN pip3 install -r requirements.txt
 
 # Set entry point to Python wrapper
 ENTRYPOINT ["python3", "worker.py"]
