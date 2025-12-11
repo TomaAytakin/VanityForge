@@ -1,6 +1,7 @@
 import subprocess
 import os
 import json
+import logging
 import firebase_admin
 from firebase_admin import credentials, firestore
 import base64
@@ -11,6 +12,9 @@ import base58
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 # Initialize Firebase
 # Note: In Cloud Run, credentials are often auto-detected or passed via env var.
@@ -35,6 +39,7 @@ def generate_key_from_pin(pin, user_id):
 def run_gpu_grinder(prefix, suffix, gpu_index=0):
     # Call the solanity binary
     # usage: ./solanity --prefix <p> --suffix <s> --gpu-index <idx>
+    # Note: We do not add a JSON flag because the binary outputs JSON by default on success.
     cmd = ["./solanity"]
 
     if prefix:
@@ -44,29 +49,48 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
 
     cmd.extend(["--gpu-index", str(gpu_index)])
 
-    print(f"Starting GPU grinder with command: {' '.join(cmd)}")
+    logging.info(f"Starting GPU grinder with command: {' '.join(cmd)}")
 
     try:
         # Run the command and capture output
         # The binary prints JSON to stdout and exits with 0 on success
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        # check=False to handle return code manually
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+
+        if result.returncode != 0:
+            logging.error(f"Binary Error: Return Code {result.returncode}")
+            logging.error(f"Stderr: {stderr}")
+            return None, None
+
+        if not stdout:
+            logging.error("Binary Error: Empty stdout")
+            logging.error(f"Stderr: {stderr}")
+            return None, None
 
         # The stdout might contain other logs if not careful, but main.cu seems clean.
         # Find the JSON part if there's noise?
-        # Assuming clean JSON for now as per main.cu code.
-
         try:
             data = json.loads(stdout)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             # Fallback: try to find the start and end of JSON
             start = stdout.find('{')
             end = stdout.rfind('}')
             if start != -1 and end != -1:
-                json_str = stdout[start:end+1]
-                data = json.loads(json_str)
+                try:
+                    json_str = stdout[start:end+1]
+                    data = json.loads(json_str)
+                except json.JSONDecodeError:
+                    logging.error(f"Error parsing GPU output: {e}")
+                    logging.error(f"Raw output: {stdout}")
+                    logging.error(f"Stderr: {stderr}")
+                    return None, None
             else:
-                raise
+                logging.error(f"Error parsing GPU output: {e}")
+                logging.error(f"Raw output: {stdout}")
+                logging.error(f"Stderr: {stderr}")
+                return None, None
 
         address = data.get("public_key")
         secret_ints = data.get("secret_key")
@@ -78,13 +102,8 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
 
         return address, secret_b58
 
-    except subprocess.CalledProcessError as e:
-        print(f"Error running GPU grinder: {e}")
-        print(f"Stderr: {e.stderr}")
-        return None, None
     except Exception as e:
-        print(f"Error parsing GPU output: {e}")
-        print(f"Raw output: {result.stdout if 'result' in locals() else 'N/A'}")
+        logging.exception(f"Unexpected error in run_gpu_grinder: {e}")
         return None, None
 
 if __name__ == "__main__":
@@ -102,10 +121,10 @@ if __name__ == "__main__":
     TASK_USER_ID = os.environ.get("TASK_USER_ID")
 
     if not TASK_JOB_ID or not TASK_PIN or not TASK_USER_ID:
-        print("Missing required environment variables: TASK_JOB_ID, TASK_PIN, TASK_USER_ID")
+        logging.error("Missing required environment variables: TASK_JOB_ID, TASK_PIN, TASK_USER_ID")
         sys.exit(1)
 
-    print(f"Worker started for Job ID: {TASK_JOB_ID}")
+    logging.info(f"Worker started for Job ID: {TASK_JOB_ID}")
 
     try:
         # Update Firestore job status to 'RUNNING' (if not already)
@@ -135,25 +154,25 @@ if __name__ == "__main__":
                     })
                     # Force a synchronous blocking read to ensure data is committed before exiting
                     job_ref.get()
-                    print("INFO: FOUND_KEY_UPDATE_SUCCESS")
-                    print(f"Job {TASK_JOB_ID} completed successfully. Address: {address}")
+                    logging.info("INFO: FOUND_KEY_UPDATE_SUCCESS")
+                    logging.info(f"Job {TASK_JOB_ID} completed successfully. Address: {address}")
                     success = True
                     break
                 except Exception as update_err:
-                    print(f"Warning: Firestore update failed (attempt {attempt+1}/5): {update_err}")
+                    logging.warning(f"Warning: Firestore update failed (attempt {attempt+1}/5): {update_err}")
                     time.sleep(2 ** attempt) # Exponential backoff
 
             if not success:
-                print("ERROR: FIRESTORE_UPDATE_FAILED")
+                logging.error("ERROR: FIRESTORE_UPDATE_FAILED")
                 sys.exit(1)
 
         else:
-            print("Failed to generate address.")
+            logging.error("Failed to generate address.")
             job_ref.update({'status': 'FAILED', 'error': 'GPU Worker failed to generate address'})
             sys.exit(1)
 
     except Exception as e:
-        print(f"Worker failed: {e}")
+        logging.exception(f"Worker failed: {e}")
         try:
             db.collection('vanity_jobs').document(TASK_JOB_ID).update({'status': 'FAILED', 'error': str(e)})
         except:
