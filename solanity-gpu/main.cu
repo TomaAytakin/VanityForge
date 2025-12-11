@@ -105,29 +105,60 @@ unsigned long long int makeSeed() {
 
 void vanity_setup(config &vanity, int gpu_index) {
     CUDA_CHK(cudaSetDevice(gpu_index));
+
+    int blockSize = 256;  // threads per block
+    int blocks_per_sm = 1024;  // multiplier: high parallelism for Ada/L4
+
     cudaDeviceProp device;
     CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
 
-    int blockSize = 0, minGridSize = 0, maxActiveBlocks = 0;
-    CUDA_CHK(cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0));
-    CUDA_CHK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0));
+    int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
+    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
 
+    // allocate RNG state buffer for all threads
     unsigned long long int rseed = makeSeed();
     unsigned long long int* dev_rseed;
     CUDA_CHK(cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int)));
     CUDA_CHK(cudaMemcpy(dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
-    CUDA_CHK(cudaMalloc((void **)&(vanity.states), maxActiveBlocks * blockSize * sizeof(curandState)));
+    CUDA_CHK(cudaMalloc((void**)&vanity.states, totalThreads * sizeof(curandState)));
     vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states);
     CUDA_CHK(cudaDeviceSynchronize());
+
+    // Debug output appears in Cloud Run logs
+    printf("GPU: %s, SMs=%d, blockSize=%d, blocks=%d, totalThreads=%zu\n",
+           device.name,
+           device.multiProcessorCount,
+           blockSize,
+           maxActiveBlocks,
+           totalThreads);
+    fflush(stdout);
 }
 
 void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString suffix) {
     CUDA_CHK(cudaSetDevice(gpu_index));
 
-    int blockSize = 0, minGridSize = 0, maxActiveBlocks = 0;
-    CUDA_CHK(cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0));
-    CUDA_CHK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0));
+    int blockSize = 256;  // threads per block
+    int blocks_per_sm = 1024;  // multiplier: high parallelism for Ada/L4
+
+    cudaDeviceProp device;
+    CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
+
+    int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
+    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+
+    // Debug output appears in Cloud Run logs
+    printf("GPU: %s, SMs=%d, blockSize=%d, blocks=%d, totalThreads=%zu\n",
+           device.name,
+           device.multiProcessorCount,
+           blockSize,
+           maxActiveBlocks,
+           totalThreads);
+    fflush(stdout);
+
+    printf("Launching kernel with blockSize=%d, blocks=%d (SMs=%d)\n",
+       blockSize, maxActiveBlocks, device.multiProcessorCount);
+    fflush(stdout);
 
     int keys_found_total = 0;
     int keys_found_this_iteration = 0;
