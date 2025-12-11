@@ -1,6 +1,7 @@
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+FROM nvidia/cuda:11.4.3-devel-ubuntu20.04
 
 # Install build tools and Python
+# Ubuntu 20.04 might need python3-pip explicitly.
 RUN apt-get update && apt-get install -y \
     gcc \
     make \

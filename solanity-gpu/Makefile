@@ -4,7 +4,7 @@
 NVCC := nvcc
 
 # Flags
-NVCC_FLAGS := -O3 --generate-code arch=compute_89,code=sm_89 --generate-code arch=compute_75,code=sm_75 --generate-code arch=compute_80,code=sm_80
+NVCC_FLAGS := -O3 -arch=sm_75
 
 # Target
 TARGET := solanity
