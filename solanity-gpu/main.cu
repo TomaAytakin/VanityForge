@@ -104,52 +104,52 @@ unsigned long long int makeSeed() {
 }
 
 void vanity_setup(config &vanity, int gpu_index) {
-    cudaSetDevice(gpu_index);
+    CUDA_CHK(cudaSetDevice(gpu_index));
     cudaDeviceProp device;
-    cudaGetDeviceProperties(&device, gpu_index);
+    CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
 
     int blockSize = 0, minGridSize = 0, maxActiveBlocks = 0;
-    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0);
+    CUDA_CHK(cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0));
+    CUDA_CHK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0));
 
     unsigned long long int rseed = makeSeed();
     unsigned long long int* dev_rseed;
-    cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int));
-    cudaMemcpy(dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice);
+    CUDA_CHK(cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int)));
+    CUDA_CHK(cudaMemcpy(dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
-    cudaMalloc((void **)&(vanity.states), maxActiveBlocks * blockSize * sizeof(curandState));
+    CUDA_CHK(cudaMalloc((void **)&(vanity.states), maxActiveBlocks * blockSize * sizeof(curandState)));
     vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states);
-    cudaDeviceSynchronize();
+    CUDA_CHK(cudaDeviceSynchronize());
 }
 
 void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString suffix) {
-    cudaSetDevice(gpu_index);
+    CUDA_CHK(cudaSetDevice(gpu_index));
 
     int blockSize = 0, minGridSize = 0, maxActiveBlocks = 0;
-    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0);
+    CUDA_CHK(cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0));
+    CUDA_CHK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0));
 
     int keys_found_total = 0;
-    int keys_found_this_iteration;
+    int keys_found_this_iteration = 0;
     int* dev_keys_found;
     int* dev_executions_this_gpu;
     int* dev_g;
 
-    cudaMalloc((void**)&dev_keys_found, sizeof(int));
-    cudaMalloc((void**)&dev_executions_this_gpu, sizeof(int));
-    cudaMalloc((void**)&dev_g, sizeof(int));
+    CUDA_CHK(cudaMalloc((void**)&dev_keys_found, sizeof(int)));
+    CUDA_CHK(cudaMalloc((void**)&dev_executions_this_gpu, sizeof(int)));
+    CUDA_CHK(cudaMalloc((void**)&dev_g, sizeof(int)));
 
-    cudaMemcpy(dev_g, &gpu_index, sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemset(dev_keys_found, 0, sizeof(int));
+    CUDA_CHK(cudaMemcpy(dev_g, &gpu_index, sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHK(cudaMemset(dev_keys_found, 0, sizeof(int)));
 
     for (int i = 0; i < MAX_ITERATIONS; ++i) {
-        cudaMemset(dev_executions_this_gpu, 0, sizeof(int));
+        CUDA_CHK(cudaMemset(dev_executions_this_gpu, 0, sizeof(int)));
 
         vanity_scan<<<maxActiveBlocks, blockSize>>>(vanity.states, dev_keys_found, dev_g, dev_executions_this_gpu, prefix, suffix);
 
-        cudaDeviceSynchronize();
+        CUDA_CHK(cudaDeviceSynchronize());
 
-        cudaMemcpy(&keys_found_this_iteration, dev_keys_found, sizeof(int), cudaMemcpyDeviceToHost);
+        CUDA_CHK(cudaMemcpy(&keys_found_this_iteration, dev_keys_found, sizeof(int), cudaMemcpyDeviceToHost));
         keys_found_total = keys_found_this_iteration; // since atomicAdd accumulates
 
         if (keys_found_total >= STOP_AFTER_KEYS_FOUND) {
