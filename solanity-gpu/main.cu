@@ -113,14 +113,60 @@ unsigned long long int makeSeed() {
 void vanity_setup(config &vanity, int gpu_index) {
     CUDA_CHK(cudaSetDevice(gpu_index));
 
-    int blockSize = 256;  // threads per block
-    int blocks_per_sm = 1024;  // multiplier: high parallelism for Ada/L4
+    // Tunable grid sizing with safe defaults per device
+    const char* env_block = getenv("GPU_BLOCKSIZE");
+    const char* env_blocks_per_sm = getenv("GPU_BLOCKS_PER_SM");
 
+    int blockSize = env_block ? atoi(env_block) : 256; // threads per block
+    int blocks_per_sm = env_blocks_per_sm ? atoi(env_blocks_per_sm) : 0;
+
+    // Device-based defaults
     cudaDeviceProp device;
     CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
+    int major = device.major;
+    int minor = device.minor;
+
+    if (blocks_per_sm == 0) {
+        // Choose safe defaults:
+        // L4 (Ada, sm_89) -> more parallelism
+        // T4 (Turing, sm_75) -> conservative
+        if (major == 8 && minor >= 9) {
+            blocks_per_sm = 256;
+        } else if (major == 7 && minor == 5) {
+            blocks_per_sm = 128;
+        } else {
+            blocks_per_sm = 128; // fallback safe default
+        }
+    }
+
+    // Safety caps
+    if (blockSize < 32) blockSize = 32;
+    if (blockSize > 1024) blockSize = 1024;
+    if (blocks_per_sm < 1) blocks_per_sm = 1;
+    if (blocks_per_sm > 2048) blocks_per_sm = 2048;
 
     int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
-    size_t total_threads = (size_t)maxActiveBlocks * (size_t)blockSize;
+    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+
+    // Check curandState allocation vs available memory and reduce if necessary
+    size_t req_bytes = totalThreads * sizeof(curandState);
+    size_t freeMem = 0, totalMem = 0;
+#if CUDART_VERSION >= 10000
+    cudaMemGetInfo(&freeMem, &totalMem);
+#endif
+    if (freeMem > 0 && req_bytes > (freeMem * 8) / 10) {
+        size_t allowedThreads = (freeMem * 8) / 10 / sizeof(curandState);
+        int new_blocks = (int)(allowedThreads / blockSize);
+        if (new_blocks < 1) new_blocks = 1;
+        maxActiveBlocks = new_blocks;
+        totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+    }
+
+    // Debug print to Cloud Run logs
+    printf("GPU: %s | compute=%d.%d | SMs=%d | blockSize=%d | blocks_per_sm=%d | blocks=%d | totalThreads=%zu | curand_bytes=%zu\n",
+           device.name, device.major, device.minor,
+           device.multiProcessorCount, blockSize, blocks_per_sm, maxActiveBlocks, totalThreads, req_bytes);
+    fflush(stdout);
 
     // allocate RNG state buffer for all threads
     unsigned long long int rseed = makeSeed();
@@ -128,40 +174,68 @@ void vanity_setup(config &vanity, int gpu_index) {
     CUDA_CHK(cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int)));
     CUDA_CHK(cudaMemcpy(dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
-    // Ensure allocation uses exactly total_threads * sizeof(curandState)
-    CUDA_CHK(cudaMalloc((void**)&vanity.states, total_threads * sizeof(curandState)));
+    // Ensure allocation uses exactly totalThreads * sizeof(curandState)
+    CUDA_CHK(cudaMalloc((void**)&vanity.states, totalThreads * sizeof(curandState)));
     vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states);
     CUDA_CHK(cudaDeviceSynchronize());
-
-    // Debug output appears in Cloud Run logs
-    printf("GPU: %s, SMs=%d, blockSize=%d, blocks=%d, totalThreads=%zu\n",
-           device.name,
-           device.multiProcessorCount,
-           blockSize,
-           maxActiveBlocks,
-           total_threads);
-    fflush(stdout);
 }
 
 void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString suffix) {
     CUDA_CHK(cudaSetDevice(gpu_index));
 
-    int blockSize = 256;  // threads per block
-    int blocks_per_sm = 1024;  // multiplier: high parallelism for Ada/L4
+    // Tunable grid sizing with safe defaults per device
+    const char* env_block = getenv("GPU_BLOCKSIZE");
+    const char* env_blocks_per_sm = getenv("GPU_BLOCKS_PER_SM");
 
+    int blockSize = env_block ? atoi(env_block) : 256; // threads per block
+    int blocks_per_sm = env_blocks_per_sm ? atoi(env_blocks_per_sm) : 0;
+
+    // Device-based defaults
     cudaDeviceProp device;
     CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
+    int major = device.major;
+    int minor = device.minor;
+
+    if (blocks_per_sm == 0) {
+        // Choose safe defaults:
+        // L4 (Ada, sm_89) -> more parallelism
+        // T4 (Turing, sm_75) -> conservative
+        if (major == 8 && minor >= 9) {
+            blocks_per_sm = 256;
+        } else if (major == 7 && minor == 5) {
+            blocks_per_sm = 128;
+        } else {
+            blocks_per_sm = 128; // fallback safe default
+        }
+    }
+
+    // Safety caps
+    if (blockSize < 32) blockSize = 32;
+    if (blockSize > 1024) blockSize = 1024;
+    if (blocks_per_sm < 1) blocks_per_sm = 1;
+    if (blocks_per_sm > 2048) blocks_per_sm = 2048;
 
     int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
     size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
 
-    // Debug output appears in Cloud Run logs
-    printf("GPU: %s, SMs=%d, blockSize=%d, blocks=%d, totalThreads=%zu\n",
-           device.name,
-           device.multiProcessorCount,
-           blockSize,
-           maxActiveBlocks,
-           totalThreads);
+    // Check curandState allocation vs available memory and reduce if necessary
+    size_t req_bytes = totalThreads * sizeof(curandState);
+    size_t freeMem = 0, totalMem = 0;
+#if CUDART_VERSION >= 10000
+    cudaMemGetInfo(&freeMem, &totalMem);
+#endif
+    if (freeMem > 0 && req_bytes > (freeMem * 8) / 10) {
+        size_t allowedThreads = (freeMem * 8) / 10 / sizeof(curandState);
+        int new_blocks = (int)(allowedThreads / blockSize);
+        if (new_blocks < 1) new_blocks = 1;
+        maxActiveBlocks = new_blocks;
+        totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+    }
+
+    // Debug print to Cloud Run logs
+    printf("GPU: %s | compute=%d.%d | SMs=%d | blockSize=%d | blocks_per_sm=%d | blocks=%d | totalThreads=%zu | curand_bytes=%zu\n",
+           device.name, device.major, device.minor,
+           device.multiProcessorCount, blockSize, blocks_per_sm, maxActiveBlocks, totalThreads, req_bytes);
     fflush(stdout);
 
     printf("Launching kernel with blockSize=%d, blocks=%d (SMs=%d)\n",
