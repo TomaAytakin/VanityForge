@@ -46,6 +46,13 @@ void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* 
 bool __device__ b58enc(char* b58, size_t* b58sz, uint8_t* data, size_t binsz);
 
 int main(int argc, char const* argv[]) {
+    // 1. Device Capability Check
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    printf("GPU name: %s | Compute Capability: %d.%d\n",
+           prop.name, prop.major, prop.minor);
+    fflush(stdout);
+
     ed25519_set_verbose(false); // Less noise
 
     char* prefix_str = NULL;
@@ -113,7 +120,7 @@ void vanity_setup(config &vanity, int gpu_index) {
     CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
 
     int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
-    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+    size_t total_threads = (size_t)maxActiveBlocks * (size_t)blockSize;
 
     // allocate RNG state buffer for all threads
     unsigned long long int rseed = makeSeed();
@@ -121,7 +128,8 @@ void vanity_setup(config &vanity, int gpu_index) {
     CUDA_CHK(cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int)));
     CUDA_CHK(cudaMemcpy(dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
-    CUDA_CHK(cudaMalloc((void**)&vanity.states, totalThreads * sizeof(curandState)));
+    // Ensure allocation uses exactly total_threads * sizeof(curandState)
+    CUDA_CHK(cudaMalloc((void**)&vanity.states, total_threads * sizeof(curandState)));
     vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states);
     CUDA_CHK(cudaDeviceSynchronize());
 
@@ -131,7 +139,7 @@ void vanity_setup(config &vanity, int gpu_index) {
            device.multiProcessorCount,
            blockSize,
            maxActiveBlocks,
-           totalThreads);
+           total_threads);
     fflush(stdout);
 }
 
