@@ -1,0 +1,270 @@
+--- solanity-gpu/main.cu.orig	2025-12-12 00:46:21.847272087 +0000
++++ solanity-gpu/main.cu	2025-12-12 00:47:03.390648216 +0000
+@@ -9,7 +9,7 @@
+ #include <stdio.h>
+ #include <string.h>
+
+-#include "curand_kernel.h"
++// Removed curand_kernel.h
+ #include "ed25519.h"
+ #include "fixedint.h"
+ #include "gpu_common.h"
+@@ -34,15 +34,13 @@
+     int len;
+ };
+
+-typedef struct {
+-    curandState* states;
+-} config;
++// Removed config struct with curandState
+
+ // Prototypes
+-void vanity_setup(config& vanity, int gpu_index);
+-void vanity_run(config& vanity, int gpu_index, KernelString prefix, KernelString suffix);
+-void __global__ vanity_init(unsigned long long int* seed, curandState* state);
+-void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* execution_count, KernelString prefix, KernelString suffix);
++void vanity_setup(int gpu_index);
++void vanity_run(int gpu_index, KernelString prefix, KernelString suffix);
++// Removed vanity_init
++void __global__ vanity_scan(uint64_t seed_base, int* keys_found, int* gpu, unsigned long long* attempts_counter, KernelString prefix, KernelString suffix);
+ bool __device__ b58enc(char* b58, size_t* b58sz, uint8_t* data, size_t binsz);
+
+ int main(int argc, char const* argv[]) {
+@@ -85,9 +83,8 @@
+         suffix_ks.len = strlen(suffix_ks.data);
+     }
+
+-    config vanity;
+-    vanity_setup(vanity, gpu_index);
+-    vanity_run(vanity, gpu_index, prefix_ks, suffix_ks);
++    vanity_setup(gpu_index);
++    vanity_run(gpu_index, prefix_ks, suffix_ks);
+     return 0;
+ }
+
+@@ -98,89 +95,12 @@
+     return s;
+ }
+
+-unsigned long long int makeSeed() {
+-    unsigned long long int seed = 0;
+-    char *pseed = (char *)&seed;
+-    std::random_device rd;
+-    for(unsigned int b=0; b<sizeof(seed); b++) {
+-      auto r = rd();
+-      char *entropy = (char *)&r;
+-      pseed[b] = entropy[0];
+-    }
+-    return seed;
+-}
+-
+-void vanity_setup(config &vanity, int gpu_index) {
++void vanity_setup(int gpu_index) {
+     CUDA_CHK(cudaSetDevice(gpu_index));
+-
+-    // Tunable grid sizing with safe defaults per device
+-    const char* env_block = getenv("GPU_BLOCKSIZE");
+-    const char* env_blocks_per_sm = getenv("GPU_BLOCKS_PER_SM");
+-
+-    int blockSize = env_block ? atoi(env_block) : 256; // threads per block
+-    int blocks_per_sm = env_blocks_per_sm ? atoi(env_blocks_per_sm) : 0;
+-
+-    // Device-based defaults
+-    cudaDeviceProp device;
+-    CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
+-    int major = device.major;
+-    int minor = device.minor;
+-
+-    if (blocks_per_sm == 0) {
+-        // Choose safe defaults:
+-        // L4 (Ada, sm_89) -> more parallelism
+-        // T4 (Turing, sm_75) -> conservative
+-        if (major == 8 && minor >= 9) {
+-            blocks_per_sm = 256;
+-        } else if (major == 7 && minor == 5) {
+-            blocks_per_sm = 128;
+-        } else {
+-            blocks_per_sm = 128; // fallback safe default
+-        }
+-    }
+-
+-    // Safety caps
+-    if (blockSize < 32) blockSize = 32;
+-    if (blockSize > 1024) blockSize = 1024;
+-    if (blocks_per_sm < 1) blocks_per_sm = 1;
+-    if (blocks_per_sm > 2048) blocks_per_sm = 2048;
+-
+-    int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
+-    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+-
+-    // Check curandState allocation vs available memory and reduce if necessary
+-    size_t req_bytes = totalThreads * sizeof(curandState);
+-    size_t freeMem = 0, totalMem = 0;
+-#if CUDART_VERSION >= 10000
+-    cudaMemGetInfo(&freeMem, &totalMem);
+-#endif
+-    if (freeMem > 0 && req_bytes > (freeMem * 8) / 10) {
+-        size_t allowedThreads = (freeMem * 8) / 10 / sizeof(curandState);
+-        int new_blocks = (int)(allowedThreads / blockSize);
+-        if (new_blocks < 1) new_blocks = 1;
+-        maxActiveBlocks = new_blocks;
+-        totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+-    }
+-
+-    // Debug print to Cloud Run logs
+-    printf("GPU: %s | compute=%d.%d | SMs=%d | blockSize=%d | blocks_per_sm=%d | blocks=%d | totalThreads=%zu | curand_bytes=%zu\n",
+-           device.name, device.major, device.minor,
+-           device.multiProcessorCount, blockSize, blocks_per_sm, maxActiveBlocks, totalThreads, req_bytes);
+-    fflush(stdout);
+-
+-    // allocate RNG state buffer for all threads
+-    unsigned long long int rseed = makeSeed();
+-    unsigned long long int* dev_rseed;
+-    CUDA_CHK(cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int)));
+-    CUDA_CHK(cudaMemcpy(dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
+-
+-    // Ensure allocation uses exactly totalThreads * sizeof(curandState)
+-    CUDA_CHK(cudaMalloc((void**)&vanity.states, totalThreads * sizeof(curandState)));
+-    vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states);
+-    CUDA_CHK(cudaDeviceSynchronize());
++    // Removed complex setup and memory allocation for curandState
+ }
+
+-void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString suffix) {
++void vanity_run(int gpu_index, KernelString prefix, KernelString suffix) {
+     CUDA_CHK(cudaSetDevice(gpu_index));
+
+     // Tunable grid sizing with safe defaults per device
+@@ -216,26 +136,12 @@
+     if (blocks_per_sm > 2048) blocks_per_sm = 2048;
+
+     int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
+-    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+-
+-    // Check curandState allocation vs available memory and reduce if necessary
+-    size_t req_bytes = totalThreads * sizeof(curandState);
+-    size_t freeMem = 0, totalMem = 0;
+-#if CUDART_VERSION >= 10000
+-    cudaMemGetInfo(&freeMem, &totalMem);
+-#endif
+-    if (freeMem > 0 && req_bytes > (freeMem * 8) / 10) {
+-        size_t allowedThreads = (freeMem * 8) / 10 / sizeof(curandState);
+-        int new_blocks = (int)(allowedThreads / blockSize);
+-        if (new_blocks < 1) new_blocks = 1;
+-        maxActiveBlocks = new_blocks;
+-        totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+-    }
++    // Removed memory check for curandState as it's no longer used
+
+     // Debug print to Cloud Run logs
+-    printf("GPU: %s | compute=%d.%d | SMs=%d | blockSize=%d | blocks_per_sm=%d | blocks=%d | totalThreads=%zu | curand_bytes=%zu\n",
++    printf("GPU: %s | compute=%d.%d | SMs=%d | blockSize=%d | blocks_per_sm=%d | blocks=%d\n",
+            device.name, device.major, device.minor,
+-           device.multiProcessorCount, blockSize, blocks_per_sm, maxActiveBlocks, totalThreads, req_bytes);
++           device.multiProcessorCount, blockSize, blocks_per_sm, maxActiveBlocks);
+     fflush(stdout);
+
+     printf("Launching kernel with blockSize=%d, blocks=%d (SMs=%d)\n",
+@@ -245,22 +151,41 @@
+     int keys_found_total = 0;
+     int keys_found_this_iteration = 0;
+     int* dev_keys_found;
+-    int* dev_executions_this_gpu;
+     int* dev_g;
++    unsigned long long* dev_attempts;
+
+     CUDA_CHK(cudaMalloc((void**)&dev_keys_found, sizeof(int)));
+-    CUDA_CHK(cudaMalloc((void**)&dev_executions_this_gpu, sizeof(int)));
++    CUDA_CHK(cudaMalloc((void**)&dev_attempts, sizeof(unsigned long long)));
+     CUDA_CHK(cudaMalloc((void**)&dev_g, sizeof(int)));
+
+     CUDA_CHK(cudaMemcpy(dev_g, &gpu_index, sizeof(int), cudaMemcpyHostToDevice));
+     CUDA_CHK(cudaMemset(dev_keys_found, 0, sizeof(int)));
+
+     for (int i = 0; i < MAX_ITERATIONS; ++i) {
+-        CUDA_CHK(cudaMemset(dev_executions_this_gpu, 0, sizeof(int)));
++        CUDA_CHK(cudaMemset(dev_attempts, 0, sizeof(unsigned long long)));
++
++        auto start = std::chrono::high_resolution_clock::now();
++
++        // Use a simple seed base: loop index + time or just loop index (since time changes slowly)
++        // To ensure randomness across restarts, maybe combine with something else, but loop index is sufficient for unique seeds in a run.
++        // Adding clock() to seed ensures difference if process restarts.
++        uint64_t seed_base = (uint64_t)i + (uint64_t)time(NULL) * 1000;
+
+-        vanity_scan<<<maxActiveBlocks, blockSize>>>(vanity.states, dev_keys_found, dev_g, dev_executions_this_gpu, prefix, suffix);
++        vanity_scan<<<maxActiveBlocks, blockSize>>>(seed_base, dev_keys_found, dev_g, dev_attempts, prefix, suffix);
+
+         CUDA_CHK(cudaDeviceSynchronize());
++
++        auto end = std::chrono::high_resolution_clock::now();
++
++        unsigned long long attempts = 0;
++        CUDA_CHK(cudaMemcpy(&attempts, dev_attempts, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
++
++        std::chrono::duration<double> diff = end - start;
++        double seconds = diff.count();
++        if (seconds > 0) {
++            printf("Attempts/sec: %.2f\n", (double)attempts / seconds);
++            fflush(stdout);
++        }
+
+         CUDA_CHK(cudaMemcpy(&keys_found_this_iteration, dev_keys_found, sizeof(int), cudaMemcpyDeviceToHost));
+         keys_found_total = keys_found_this_iteration; // since atomicAdd accumulates
+@@ -271,27 +196,37 @@
+     }
+ }
+
+-void __global__ vanity_init(unsigned long long int* rseed, curandState* state) {
+-    int id = threadIdx.x + (blockIdx.x * blockDim.x);
+-    curand_init(*rseed + id, id, 0, &state[id]);
++__device__ __forceinline__ uint32_t xorshift32(uint32_t* state) {
++    uint32_t x = *state;
++    x ^= x << 13;
++    x ^= x >> 17;
++    x ^= x << 5;
++    *state = x;
++    return x;
+ }
+
+-void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* exec_count, KernelString prefix, KernelString suffix) {
++void __global__ vanity_scan(uint64_t seed_base, int* keys_found, int* gpu, unsigned long long* attempts_counter, KernelString prefix, KernelString suffix) {
+     int id = threadIdx.x + (blockIdx.x * blockDim.x);
+-    atomicAdd(exec_count, 1);
++    atomicAdd(attempts_counter, ATTEMPTS_PER_EXECUTION);
+
+     // Local Kernel State
+     ge_p3 A;
+-    curandState localState = state[id];
++    // Removed curandState
++
+     unsigned char seed[32] = {0};
+     unsigned char publick[32] = {0};
+     unsigned char privatek[64] = {0};
+     char key[256] = {0};
+
+-    // Initialize seed from state
+-    for (int i = 0; i < 32; ++i) {
+-        float random = curand_uniform(&localState);
+-        seed[i] = (uint8_t)(random * 255);
++    // Initialize seed using inline RNG
++    uint32_t rng_state = (uint32_t)((seed_base + id) ^ 0xDEADBEEF);
++    for (int i = 0; i < 32; i+=4) {
++        uint32_t r = xorshift32(&rng_state);
++        // Copy 4 bytes safely
++        seed[i]   = (r >> 0)  & 0xFF;
++        seed[i+1] = (r >> 8)  & 0xFF;
++        seed[i+2] = (r >> 16) & 0xFF;
++        seed[i+3] = (r >> 24) & 0xFF;
+     }
+
+     sha512_context md;
+@@ -414,8 +349,6 @@
+             }
+         }
+     }
+-
+-    state[id] = localState;
+ }
+
+ bool __device__ b58enc(char *b58, size_t *b58sz, uint8_t *data, size_t binsz) {
