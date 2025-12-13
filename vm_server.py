@@ -645,6 +645,44 @@ def reveal_key():
     finally:
         cleanup_firestore_client(db)
 
+@app.route('/api/check-sns', methods=['POST'])
+def check_sns():
+    """Proxy route to check SNS availability via Mainnet RPC"""
+    data = request.get_json(silent=True) or {}
+    public_key = data.get('publicKey')
+
+    if not public_key:
+        return jsonify({'error': 'Missing publicKey'}), 400
+
+    # Payload for getAccountInfo
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getAccountInfo",
+        "params": [
+            public_key,
+            {"encoding": "base58"}
+        ]
+    }
+
+    try:
+        # Use the standard mainnet-beta endpoint as requested
+        # Server-side request avoids browser CORS issues
+        rpc_url = "https://api.mainnet-beta.solana.com"
+        resp = requests.post(rpc_url, json=payload, timeout=5)
+
+        # If the RPC returns an error (even 200 OK with error body), forward it or handle it
+        if resp.status_code != 200:
+            logging.error(f"SNS Proxy RPC Error: {resp.status_code} {resp.text}")
+            return jsonify({'error': 'RPC Error'}), resp.status_code
+
+        rpc_data = resp.json()
+        return jsonify(rpc_data)
+
+    except Exception as e:
+        logging.exception("SNS Proxy Failed")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
     # START THE TRAFFIC CONTROLLER THREAD
