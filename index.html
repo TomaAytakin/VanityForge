@@ -43,6 +43,7 @@
                     <div class="hidden md:block">
                         <div class="ml-10 flex items-baseline space-x-4">
                             <a href="/" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
+                            <a href="/vvvip" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">VVVIP Addresses</a>
                             <a href="/roadmap" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
                             <a href="/faq" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
                             <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-x-twitter"></i></a>
@@ -62,6 +63,7 @@
         <div class="hidden md:hidden" id="mobile-menu">
             <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
                 <a href="/" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">Forge</a>
+                <a href="/vvvip" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">VVVIP Addresses</a>
                 <a href="/roadmap" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
                 <a href="/faq" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
                 <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium"><i class="fa-brands fa-x-twitter"></i> X (Twitter)</a>
@@ -87,30 +89,6 @@
     </div>
 
     <div id="app-interface" class="w-full max-w-2xl hidden space-y-6 animate-fade-in-up">
-
-        <!-- SNS Checker Section -->
-        <div class="glass-panel p-8 rounded-xl shadow-lg relative overflow-hidden">
-            <div class="absolute top-0 right-0 p-4 opacity-10">
-                <i class="fa-solid fa-search text-6xl text-blue-500"></i>
-            </div>
-            <h2 class="text-xl font-bold mb-4 text-blue-400 flex items-center gap-2">
-                <i class="fa-solid fa-globe"></i> Solana Name Service (SNS)
-            </h2>
-            <div class="flex gap-2 items-center mb-4">
-                <div class="flex-grow">
-                    <div class="relative">
-                        <input type="text" id="sns-domain-input" class="w-full bg-gray-800 border border-gray-700 rounded p-3 pl-4 focus:border-blue-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="check-your-name">
-                        <span class="absolute right-3 top-3 text-gray-500 font-mono">.sol</span>
-                    </div>
-                </div>
-                <button onclick="checkSNS()" id="sns-check-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition transform hover:scale-105">
-                    Check
-                </button>
-            </div>
-            <div id="sns-result" class="hidden rounded-lg p-4 flex justify-between items-center animate-fade-in">
-                <!-- Result injected here -->
-            </div>
-        </div>
 
         <div class="glass-panel p-8 rounded-xl shadow-lg relative overflow-hidden">
             <div class="absolute top-0 right-0 p-4 opacity-10">
@@ -336,56 +314,6 @@
 
                 oscillator.start();
                 oscillator.stop(audioCtx.currentTime + 0.2);
-            }
-        }
-
-        // SNS CHECKER LOGIC
-        async function checkSNS() {
-            const input = document.getElementById('sns-domain-input');
-            const btn = document.getElementById('sns-check-btn');
-            const resultDiv = document.getElementById('sns-result');
-            const domain = input.value.trim().toLowerCase();
-
-            if (!domain) return;
-
-            // Reset UI
-            resultDiv.classList.add('hidden');
-            resultDiv.className = "hidden rounded-lg p-4 flex justify-between items-center animate-fade-in"; // Reset classes
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-
-            try {
-                const available = await window.SNSUtils.checkDomainAvailability(domain);
-
-                resultDiv.classList.remove('hidden');
-                if (available) {
-                    resultDiv.classList.add('bg-green-900/20', 'border', 'border-green-500/30');
-                    resultDiv.innerHTML = `
-                        <div>
-                            <span class="text-green-400 font-bold text-lg"><i class="fa-solid fa-check-circle mr-2"></i>Available</span>
-                            <div class="text-xs text-gray-400 mt-1">${domain}.sol is free to claim!</div>
-                        </div>
-                        <a href="https://sns.id/domain?domain=${domain}" target="_blank" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded shadow hover:scale-105 transition transform text-sm">
-                            Buy Now for $20
-                        </a>
-                    `;
-                } else {
-                    resultDiv.classList.add('bg-red-900/20', 'border', 'border-red-500/30');
-                    resultDiv.innerHTML = `
-                        <div>
-                            <span class="text-red-400 font-bold text-lg"><i class="fa-solid fa-times-circle mr-2"></i>Taken</span>
-                            <div class="text-xs text-gray-400 mt-1">${domain}.sol is already registered.</div>
-                        </div>
-                        <span class="text-gray-500 font-mono text-sm">Unavailable</span>
-                    `;
-                }
-
-            } catch (e) {
-                console.error(e);
-                alert("Error checking domain availability.");
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = 'Check';
             }
         }
 
