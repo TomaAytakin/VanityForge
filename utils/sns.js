@@ -204,7 +204,19 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
         })
     );
 
-    transaction.partialSign(wsolKeypair);
+    // Adapting for specific instructions
+    const buyerPublicKey = buyer;
+    const signers = [wsolKeypair];
+
+    // 🔒 Transaction invariants (REQUIRED FIX)
+    transaction.feePayer = buyerPublicKey;
+    const { blockhash } = await connection.getLatestBlockhash("finalized");
+    transaction.recentBlockhash = blockhash;
+
+    // Now it is safe to sign
+    if (signers && signers.length > 0) {
+        transaction.partialSign(...signers);
+    }
 
     return transaction;
 }
