@@ -130,52 +130,60 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
             REFERRER_KEY
         );
 
-        // Standardize to array
-        const instructions = Array.isArray(ixOrArray) ? ixOrArray : [ixOrArray];
+        // --- CRITICAL FIX: Flatten & Normalize Instructions ---
 
-        // --- CRITICAL FIX: Instruction Normalization ---
-        // Debug Log (Remove after verification)
-        console.log("SNS Raw Instructions:", instructions.map(ix => ({
-          isTI: ix instanceof TransactionInstruction,
-          type: ix.constructor.name,
-          keys: ix.keys,
-          programId: ix.programId ? ix.programId.toString() : 'missing'
-        })));
+        // 1️⃣ Flatten instructions (SNS SDK sometimes returns nested arrays)
+        // If instructions is not an array, wrap it; otherwise flatten it.
+        const rawList = Array.isArray(ixOrArray) ? ixOrArray : [ixOrArray];
+        const flatInstructions = rawList.flat();
 
-        for (const ix of instructions) {
-            // CASE 1: Already a valid TransactionInstruction (Pass through)
+        console.log("SNS Flattened Instructions:", flatInstructions); // Debug log
+
+        // 2️⃣ Process normalized instructions
+        for (const ix of flatInstructions) {
+
+            // Skip nulls, undefined, or empty arrays (Trash)
+            if (!ix || (Array.isArray(ix) && ix.length === 0)) {
+                continue;
+            }
+
+            // Case 1: Already a valid TransactionInstruction (Pass through)
             if (ix instanceof TransactionInstruction) {
                 transaction.add(ix);
                 continue;
             }
 
-            // CASE 2: Raw Object (Normalize & Wrap)
-            // This handles the "Dual Package" mismatch where instanceof might fail but data is valid
-            if (ix.programId && ix.keys && ix.data) {
-                const programId = (ix.programId instanceof PublicKey)
-                    ? ix.programId
-                    : new PublicKey(ix.programId);
+            // Case 2: Raw instruction-like object (Normalize)
+            if (ix.programId && ix.keys) { // Relaxed check (data might be missing)
+                const programId =
+                    ix.programId instanceof PublicKey
+                        ? ix.programId
+                        : new PublicKey(ix.programId);
 
-                const data = (ix.data instanceof Uint8Array)
-                    ? ix.data
-                    : Buffer.from(ix.data);
+                // Handle missing or raw data safely
+                let data = Buffer.alloc(0);
+                if (ix.data) {
+                    data = (ix.data instanceof Uint8Array)
+                        ? ix.data
+                        : Buffer.from(ix.data);
+                }
 
-                const wrappedIx = new TransactionInstruction({
-                    programId,
-                    keys: ix.keys,
-                    data
-                });
-
-                transaction.add(wrappedIx);
+                transaction.add(
+                    new TransactionInstruction({
+                        programId,
+                        keys: ix.keys,
+                        data
+                    })
+                );
                 continue;
             }
 
-            // FAIL FAST: Unknown format
-            console.error("❌ Fatal: Unsupported SNS instruction format", ix);
+            // FAIL FAST: Log the specific item causing the issue
+            console.error("❌ Invalid SNS instruction item:", ix);
             throw new Error("Unsupported SNS instruction format");
         }
 
-        // FINAL SAFETY: Explicitly set Fee Payer
+        // Final Safety: Explicitly set fee payer
         transaction.feePayer = buyer;
 
     } catch (err) {
