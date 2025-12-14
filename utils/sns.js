@@ -245,7 +245,8 @@ async function buyDomain(domain) {
 
     try {
         // Initialize Connection
-        const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+        // Use the premium Helius RPC
+        const connection = new Connection(window.SOLANA_RPC);
 
         // Create Transaction
         const transaction = await createRegisterTransaction(connection, { publicKey: wallet }, domain, 1000);
