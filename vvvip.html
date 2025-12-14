@@ -139,21 +139,33 @@
     <script>
         var currentWallet = null;
 
-        async function connectWallet() {
+        async function connectWallet(silent = false) {
             if (window.solana && window.solana.isPhantom) {
                 try {
-                    const resp = await window.solana.connect();
+                    if (!silent && window.solana.isConnected) {
+                        await window.solana.disconnect();
+                    }
+                    const options = silent ? { onlyIfTrusted: true } : {};
+                    const resp = await window.solana.connect(options);
                     currentWallet = resp.publicKey;
                     document.getElementById('wallet-btn-text').innerText =
                         currentWallet.toString().slice(0, 4) + '...' + currentWallet.toString().slice(-4);
                 } catch (err) {
-                    console.error(err);
-                    alert("Connection failed.");
+                    if (!silent) {
+                        console.error(err);
+                        alert("Connection failed.");
+                    }
                 }
             } else {
-                window.open("https://phantom.app/", "_blank");
+                if (!silent) window.open("https://phantom.app/", "_blank");
             }
         }
+
+        window.addEventListener('load', () => {
+            if (window.solana && window.solana.isPhantom) {
+                connectWallet(true);
+            }
+        });
 
         // Functions checkSNS and buyDomain are now in utils/sns.js
     </script>
