@@ -104,7 +104,7 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
 
     // 4. Initialize wSOL Account
     transaction.add(
-        TransactionInstruction.from({
+        new TransactionInstruction({
             keys: [
                 { pubkey: wsolAccount, isSigner: false, isWritable: true },
                 { pubkey: WRAPPED_SOL_MINT, isSigner: false, isWritable: false },
@@ -152,7 +152,7 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
 
     // 6. Close wSOL Account
     transaction.add(
-        TransactionInstruction.from({
+        new TransactionInstruction({
             keys: [
                 { pubkey: wsolAccount, isSigner: false, isWritable: true },
                 { pubkey: buyer, isSigner: false, isWritable: true }, // Destination
