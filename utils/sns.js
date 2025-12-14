@@ -220,19 +220,21 @@ async function checkSNS() {
 }
 
 async function buyDomain(domain) {
-    // Access global currentWallet from window (defined in HTML)
-    const wallet = window.currentWallet;
+    // Access global walletAddress from window (defined in HTML)
+    const walletAddress = window.walletAddress;
 
-    if (!wallet) {
+    if (!walletAddress) {
         alert("Please connect your wallet first.");
         // Try to call global connectWallet if it exists
         if (window.connectWallet) {
             await window.connectWallet();
-            if (!window.currentWallet) return;
+            if (!window.walletAddress) return;
         } else {
             return;
         }
     }
+
+    const wallet = new PublicKey(window.walletAddress);
 
     const btn = document.querySelector('button[onclick^="window.buyDomain"]');
     const originalText = btn ? btn.innerHTML : 'Buy Now';
@@ -246,10 +248,10 @@ async function buyDomain(domain) {
         const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
 
         // Create Transaction
-        const transaction = await createRegisterTransaction(connection, { publicKey: window.currentWallet }, domain, 1000);
+        const transaction = await createRegisterTransaction(connection, { publicKey: wallet }, domain, 1000);
 
         // Sign and Send
-        transaction.feePayer = window.currentWallet;
+        transaction.feePayer = wallet;
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
         transaction.recentBlockhash = blockhash;
 

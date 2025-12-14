@@ -141,40 +141,41 @@
     </div>
 
     <script>
-        var currentWallet = null;
+        async function connectWallet() {
+            const provider = window.solana;
 
-        async function connectWallet(silent = false) {
-            if (window.solana && window.solana.isPhantom) {
-                // 🔒 FIX: Aggressive disconnect to force popup
-                if (!silent && window.solana.isConnected) {
-                    await window.solana.disconnect();
-                    await new Promise(r => setTimeout(r, 400)); // Delay is crucial
+            if (!provider || !provider.isPhantom) {
+                window.open("https://phantom.app/", "_blank");
+                return;
+            }
+
+            try {
+                // HARD RESET: clear any cached Phantom state
+                if (provider.isConnected) {
+                    await provider.disconnect();
+                    await new Promise(r => setTimeout(r, 500));
                 }
 
-                if (!silent) {
-                    // Now connect actively (forces popup)
-                    try {
-                        const resp = await window.solana.connect();
-                        currentWallet = resp.publicKey;
-                        document.getElementById('wallet-btn-text').innerText =
-                            currentWallet.toString().slice(0, 4) + '...' + currentWallet.toString().slice(-4);
-                    } catch (err) {
-                        console.error(err);
-                        alert("Connection failed.");
-                    }
-                } else {
-                    // Silent auto-connect (only on load)
-                    try {
-                        const resp = await window.solana.connect({ onlyIfTrusted: true });
-                        currentWallet = resp.publicKey;
-                        document.getElementById('wallet-btn-text').innerText =
-                            currentWallet.toString().slice(0, 4) + '...' + currentWallet.toString().slice(-4);
-                    } catch (e) {
-                         // Silent fail
-                    }
+                // SAFETY: double-check disconnect completed
+                if (provider.isConnected) {
+                    await provider.disconnect();
                 }
-            } else {
-                if (!silent) window.open("https://phantom.app/", "_blank");
+
+                // FORCE ACCOUNT SELECTOR
+                const resp = await provider.connect({ onlyIfTrusted: false });
+
+                window.walletAddress = resp.publicKey.toString();
+
+                const btnText = document.getElementById('wallet-btn-text');
+                if (btnText) {
+                    btnText.innerText =
+                        window.walletAddress.slice(0, 4) +
+                        '...' +
+                        window.walletAddress.slice(-4);
+                }
+
+            } catch (err) {
+                console.error("Wallet connect error:", err);
             }
         }
 
