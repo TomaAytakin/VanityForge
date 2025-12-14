@@ -16,7 +16,7 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from google.cloud import firestore
 from google.cloud import run_v2
@@ -64,7 +64,7 @@ if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
     logging.critical("CRITICAL ERROR: Missing environment variables. Make sure .env exists.")
     exit(1)
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+app = Flask(__name__, static_folder='.', static_url_path='', template_folder='.')
 CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
 
 # --- RATE LIMITER CONFIGURATION ---
@@ -81,7 +81,9 @@ def index(): return app.send_static_file('index.html')
 def roadmap(): return app.send_static_file('roadmap.html')
 
 @app.route('/vvvip')
-def vvvip(): return app.send_static_file('vvvip.html')
+def vvvip():
+    rpc_url = os.getenv("SOLANA_RPC_URL", "https://rpc.ankr.com/solana")
+    return render_template('vvvip.html', rpc_url=rpc_url)
 
 @app.route('/faq')
 def faq(): return app.send_static_file('faq.html')
