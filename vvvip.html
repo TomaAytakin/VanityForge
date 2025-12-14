@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <title>VVVIP Addresses - VanityForge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+    <!-- Load Bonfida SDK as a module and expose to window -->
+    <script type="module">
+        import { registerDomainNameV2, getTvAmount } from 'https://cdn.skypack.dev/@bonfida/spl-name-service@^1.0.0';
+        // Note: Using skypack for ESM support
+        window.registerDomainNameV2 = registerDomainNameV2;
+        window.getTvAmount = getTvAmount;
+    </script>
+    <script src="utils/sns.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 80px; }
+        .glass-panel { background: rgba(40, 40, 40, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center px-4">
+
+    <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <span class="text-purple-500 font-bold text-xl tracking-wider uppercase"><i class="fa-solid fa-fire-flame-curved"></i> VanityForge</span>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="ml-10 flex items-baseline space-x-4">
+                            <a href="/" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
+                            <a href="/vvvip" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">VVVIP Addresses</a>
+                            <a href="/roadmap" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
+                            <a href="/faq" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
+                            <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-x-twitter"></i></a>
+                            <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="-mr-2 flex md:hidden">
+                    <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white">
+                        <span class="sr-only">Open main menu</span>
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="hidden md:hidden" id="mobile-menu">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                <a href="/" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Forge</a>
+                <a href="/vvvip" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">VVVIP Addresses</a>
+                <a href="/roadmap" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
+                <a href="/faq" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
+                <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium"><i class="fa-brands fa-x-twitter"></i> X (Twitter)</a>
+                <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="w-full max-w-2xl mb-8 flex justify-center mt-10">
+        <h1 class="text-4xl font-bold text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-green-400">
+            VVVIP Addresses
+        </h1>
+    </div>
+
+    <!-- WALLET CONNECTION FOR BUYING -->
+    <div class="w-full max-w-2xl flex justify-center mb-6">
+        <button id="connect-phantom-btn" onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md">
+             <i class="fa-solid fa-wallet"></i> <span id="wallet-btn-text">Connect Wallet</span>
+        </button>
+    </div>
+
+    <div id="app-interface" class="w-full max-w-2xl space-y-6 animate-fade-in-up">
+
+        <!-- SNS Checker Section -->
+        <div class="glass-panel p-8 rounded-xl shadow-lg relative overflow-hidden">
+            <div class="absolute top-0 right-0 p-4 opacity-10">
+                <i class="fa-solid fa-search text-6xl text-blue-500"></i>
+            </div>
+            <h2 class="text-xl font-bold mb-4 text-blue-400 flex items-center gap-2">
+                <i class="fa-solid fa-globe"></i> Solana Name Service (SNS)
+            </h2>
+            <p class="text-sm text-gray-400 mb-4">
+                Secure your unique .sol domain. Buy directly via VanityForge and support the ecosystem.
+            </p>
+            <div class="flex gap-2 items-center mb-4">
+                <div class="flex-grow">
+                    <div class="relative">
+                        <input type="text" id="sns-domain-input" class="w-full bg-gray-800 border border-gray-700 rounded p-3 pl-4 focus:border-blue-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="check-your-name">
+                        <span class="absolute right-3 top-3 text-gray-500 font-mono">.sol</span>
+                    </div>
+                </div>
+                <button onclick="checkSNS()" id="sns-check-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition transform hover:scale-105">
+                    Check
+                </button>
+            </div>
+            <div id="sns-result" class="hidden rounded-lg p-4 flex justify-between items-center animate-fade-in">
+                <!-- Result injected here -->
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        var currentWallet = null;
+
+        async function connectWallet() {
+            if (window.solana && window.solana.isPhantom) {
+                try {
+                    const resp = await window.solana.connect();
+                    currentWallet = resp.publicKey;
+                    document.getElementById('wallet-btn-text').innerText =
+                        currentWallet.toString().slice(0, 4) + '...' + currentWallet.toString().slice(-4);
+                } catch (err) {
+                    console.error(err);
+                    alert("Connection failed.");
+                }
+            } else {
+                window.open("https://phantom.app/", "_blank");
+            }
+        }
+
+        // SNS CHECKER LOGIC
+        async function checkSNS() {
+            const input = document.getElementById('sns-domain-input');
+            const btn = document.getElementById('sns-check-btn');
+            const resultDiv = document.getElementById('sns-result');
+            const domain = input.value.trim().toLowerCase();
+
+            if (!domain) return;
+
+            // Reset UI
+            resultDiv.classList.add('hidden');
+            resultDiv.className = "hidden rounded-lg p-4 flex justify-between items-center animate-fade-in";
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+            try {
+                const available = await window.SNSUtils.checkDomainAvailability(domain);
+
+                resultDiv.classList.remove('hidden');
+                if (available) {
+                    resultDiv.classList.add('bg-green-900/20', 'border', 'border-green-500/30');
+                    resultDiv.innerHTML = `
+                        <div>
+                            <span class="text-green-400 font-bold text-lg"><i class="fa-solid fa-check-circle mr-2"></i>Available</span>
+                            <div class="text-xs text-gray-400 mt-1">${domain}.sol is free to claim!</div>
+                        </div>
+                        <button onclick="buyDomain('${domain}')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded shadow hover:scale-105 transition transform text-sm">
+                            Buy Now (~$20)
+                        </button>
+                    `;
+                } else {
+                    resultDiv.classList.add('bg-red-900/20', 'border', 'border-red-500/30');
+                    resultDiv.innerHTML = `
+                        <div>
+                            <span class="text-red-400 font-bold text-lg"><i class="fa-solid fa-times-circle mr-2"></i>Taken</span>
+                            <div class="text-xs text-gray-400 mt-1">${domain}.sol is already registered.</div>
+                        </div>
+                        <span class="text-gray-500 font-mono text-sm">Unavailable</span>
+                    `;
+                }
+
+            } catch (e) {
+                console.error(e);
+                alert("Error checking domain availability.");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Check';
+            }
+        }
+
+        async function buyDomain(domain) {
+            if (!currentWallet) {
+                alert("Please connect your wallet first.");
+                await connectWallet();
+                if (!currentWallet) return;
+            }
+
+            const btn = document.querySelector('button[onclick^="buyDomain"]');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+            btn.disabled = true;
+
+            try {
+                // Initialize Connection
+                const connection = new solanaWeb3.Connection("https://api.mainnet-beta.solana.com", "confirmed");
+
+                // Create Transaction
+                const transaction = await window.SNSUtils.createRegisterTransaction(connection, { publicKey: currentWallet }, domain, 1000);
+
+                // Sign and Send
+                transaction.feePayer = currentWallet;
+                const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+                transaction.recentBlockhash = blockhash;
+
+                const { signature } = await window.solana.signAndSendTransaction(transaction);
+
+                btn.innerHTML = 'Confirming...';
+
+                await connection.confirmTransaction({
+                    signature: signature,
+                    blockhash: blockhash,
+                    lastValidBlockHeight: lastValidBlockHeight
+                });
+
+                alert("Success! Domain registered. Signature: " + signature);
+                location.reload();
+
+            } catch (e) {
+                console.error(e);
+                alert("Transaction failed: " + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+    </script>
+</body>
+</html>
