@@ -278,7 +278,7 @@ async function buyDomain(domain) {
     }
 }
 
-// Expose functions to window so HTML onclicks work
+// 🔒 FIX: Expose module functions to global scope so HTML buttons work
 window.checkSNS = checkSNS;
 window.buyDomain = buyDomain;
 window.SNSUtils = {

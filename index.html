@@ -277,6 +277,7 @@
         });
         // STATE
         const ADMIN_EMAILS = ["tomaaytakin@gmail.com", "Jonny95hidalgo@gmail.com", "admin@vanityforge.org"];
+        let isExplicitLogin = false;
         var currentUser = null;
         var currentUserEmail = null;
         var jobListenerUnsubscribe = null;
@@ -431,6 +432,7 @@
 
         // AUTHENTICATION
         async function loginWithGoogle() {
+            isExplicitLogin = true;
             const provider = new firebase.auth.GoogleAuthProvider();
             try {
                 const result = await firebase.auth().signInWithPopup(provider);
@@ -446,11 +448,14 @@
 
         async function connectWallet(silent = false) {
             if (window.solana && window.solana.isPhantom) {
+                // 🔒 FIX: Aggressive disconnect to force popup
+                if (!silent && window.solana.isConnected) {
+                    await window.solana.disconnect();
+                    await new Promise(r => setTimeout(r, 400)); // Delay is crucial
+                }
+
                 if (!silent) {
-                    // Force disconnect and WAIT for it to finish
-                    try { await window.solana.disconnect(); } catch (e) { console.log(e); }
-                    // Add a tiny delay to ensure Phantom clears its state
-                    await new Promise(resolve => setTimeout(resolve, 200));
+                    isExplicitLogin = true;
                     // Now connect actively (forces popup)
                     try {
                         const resp = await window.solana.connect();
@@ -494,6 +499,9 @@
                 if (data.has_pin) {
                     onLoginSuccess();
                 } else {
+                    // 🔒 FIX: Stop here if this wasn't an explicit user action
+                    if (!isExplicitLogin) return;
+
                     // Prompt to create PIN
                     document.getElementById('auth-section').classList.add('hidden');
                     // Hide auth temporarily
