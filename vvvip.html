@@ -91,24 +91,52 @@
                 <i class="fa-solid fa-search text-6xl text-blue-500"></i>
             </div>
             <h2 class="text-xl font-bold mb-4 text-blue-400 flex items-center gap-2">
-                <i class="fa-solid fa-globe"></i> Solana Name Service (SNS)
+                <i class="fa-solid fa-globe"></i> Claim Your .sol Username
             </h2>
             <p class="text-sm text-gray-400 mb-4">
-                Secure your unique .sol domain. Buy directly via VanityForge and support the ecosystem.
+                Stop using long, ugly addresses. Turn 'HN7c...' into 'yourname.sol' instantly. It's like a username for your crypto wallet.
             </p>
             <div class="flex gap-2 items-center mb-4">
                 <div class="flex-grow">
                     <div class="relative">
-                        <input type="text" id="sns-domain-input" class="w-full bg-gray-800 border border-gray-700 rounded p-3 pl-4 focus:border-blue-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="check-your-name">
+                        <input type="text" id="sns-domain-input" class="w-full bg-gray-800 border border-gray-700 rounded p-3 pl-4 focus:border-blue-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="yourname">
                         <span class="absolute right-3 top-3 text-gray-500 font-mono">.sol</span>
                     </div>
                 </div>
                 <button onclick="checkSNS()" id="sns-check-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition transform hover:scale-105">
-                    Check
+                    Search
                 </button>
             </div>
             <div id="sns-result" class="hidden rounded-lg p-4 flex justify-between items-center animate-fade-in">
                 <!-- Result injected here -->
+            </div>
+        </div>
+
+        <!-- Benefits Grid Section -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Card 1 -->
+            <div class="glass-panel p-6 rounded-xl flex flex-col items-center text-center">
+                <i class="fa-solid fa-id-card text-3xl text-blue-400 mb-3"></i>
+                <h3 class="font-bold text-lg mb-2">Your Web3 Profile</h3>
+                <p class="text-sm text-gray-400">Ditch the random numbers. Make your wallet recognizable on Solscan, Phantom, and leaderboards.</p>
+            </div>
+            <!-- Card 2 -->
+            <div class="glass-panel p-6 rounded-xl flex flex-col items-center text-center">
+                <i class="fa-solid fa-money-bill-transfer text-3xl text-green-400 mb-3"></i>
+                <h3 class="font-bold text-lg mb-2">Stress-Free Payments</h3>
+                <p class="text-sm text-gray-400">Never panic about copy-pasting wrong addresses again. Just tell friends to send to 'you.sol'.</p>
+            </div>
+            <!-- Card 3 -->
+            <div class="glass-panel p-6 rounded-xl flex flex-col items-center text-center">
+                <i class="fa-solid fa-globe text-3xl text-purple-400 mb-3"></i>
+                <h3 class="font-bold text-lg mb-2">Works Everywhere</h3>
+                <p class="text-sm text-gray-400">Native support on all major Solana wallets (Phantom, Solflare, Backpack) and apps.</p>
+            </div>
+            <!-- Card 4 -->
+            <div class="glass-panel p-6 rounded-xl flex flex-col items-center text-center">
+                <i class="fa-solid fa-shield-halved text-3xl text-yellow-400 mb-3"></i>
+                <h3 class="font-bold text-lg mb-2">100% Owned by You</h3>
+                <p class="text-sm text-gray-400">Your name is an on-chain asset (NFT). You have full control to keep it, sell it, or trade it.</p>
             </div>
         </div>
 
@@ -179,7 +207,7 @@
                 alert("Error checking domain availability.");
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = 'Check';
+                btn.innerHTML = 'Search';
             }
         }
 
