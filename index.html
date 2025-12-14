@@ -438,6 +438,7 @@
                 const result = await firebase.auth().signInWithPopup(provider);
                 const user = result.user;
                 currentUser = user.uid;
+                window.walletAddress = user.uid; // Satisfy guard check
                 currentUserEmail = user.email;
                 await checkUserStatus(currentUser);
             } catch (error) {
@@ -460,6 +461,8 @@
                     try {
                         const resp = await window.solana.connect();
                         currentUser = resp.publicKey.toString();
+                        window.walletAddress = currentUser;
+                        window.currentWallet = currentUser; // Fix SNS
                         await checkUserStatus(currentUser);
                     } catch (err) {
                         console.error(err);
@@ -470,6 +473,8 @@
                     try {
                         const resp = await window.solana.connect({ onlyIfTrusted: true });
                         currentUser = resp.publicKey.toString();
+                        window.walletAddress = currentUser;
+                        window.currentWallet = currentUser; // Fix SNS
                         await checkUserStatus(currentUser);
                     } catch (e) {
                         // Silent fail - User stays as Guest
@@ -500,12 +505,16 @@
                     onLoginSuccess();
                 } else {
                     // 🔒 FIX: Stop here if this wasn't an explicit user action
-                    if (!isExplicitLogin) return;
-
-                    // Prompt to create PIN
-                    document.getElementById('auth-section').classList.add('hidden');
-                    // Hide auth temporarily
-                    openNumpad('create', 'Create your Vault PIN', null);
+                    if (
+                        isExplicitLogin === true &&
+                        window.walletAddress &&
+                        typeof window.walletAddress === "string"
+                    ) {
+                        // Prompt to create PIN
+                        document.getElementById('auth-section').classList.add('hidden');
+                        // Hide auth temporarily
+                        openNumpad('create', 'Create your Vault PIN', null);
+                    }
                 }
             } catch (e) {
                 console.error(e);
