@@ -3,3 +3,4 @@ __pycache__/
 server.log
 gpu-worker/target/
 verification_env/
+node_modules/

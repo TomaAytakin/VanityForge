@@ -131,24 +131,52 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
         );
 
         // Standardize to array
-        const ixArray = Array.isArray(ixOrArray) ? ixOrArray : [ixOrArray];
+        const instructions = Array.isArray(ixOrArray) ? ixOrArray : [ixOrArray];
 
-        ixArray.forEach(ix => {
-            // ✅ Verified: Money Check - Ensure programId matches Bonfida SNS
-            if (ix.programId.toString() !== SNS_PROGRAM_ID.toString()) {
-                console.warn("Warning: Instruction programId does not match expected SNS Program ID", ix.programId.toString());
+        // --- CRITICAL FIX: Instruction Normalization ---
+        // Debug Log (Remove after verification)
+        console.log("SNS Raw Instructions:", instructions.map(ix => ({
+          isTI: ix instanceof TransactionInstruction,
+          type: ix.constructor.name,
+          keys: ix.keys,
+          programId: ix.programId ? ix.programId.toString() : 'missing'
+        })));
+
+        for (const ix of instructions) {
+            // CASE 1: Already a valid TransactionInstruction (Pass through)
+            if (ix instanceof TransactionInstruction) {
+                transaction.add(ix);
+                continue;
             }
 
-            // 🔒 Fix: Explicitly wrap instruction to prevent version mismatch errors
-            // "TransactionInstruction.from is not a function"
-            transaction.add(
-                new TransactionInstruction({
+            // CASE 2: Raw Object (Normalize & Wrap)
+            // This handles the "Dual Package" mismatch where instanceof might fail but data is valid
+            if (ix.programId && ix.keys && ix.data) {
+                const programId = (ix.programId instanceof PublicKey)
+                    ? ix.programId
+                    : new PublicKey(ix.programId);
+
+                const data = (ix.data instanceof Uint8Array)
+                    ? ix.data
+                    : Buffer.from(ix.data);
+
+                const wrappedIx = new TransactionInstruction({
+                    programId,
                     keys: ix.keys,
-                    programId: ix.programId,
-                    data: ix.data
-                })
-            );
-        });
+                    data
+                });
+
+                transaction.add(wrappedIx);
+                continue;
+            }
+
+            // FAIL FAST: Unknown format
+            console.error("❌ Fatal: Unsupported SNS instruction format", ix);
+            throw new Error("Unsupported SNS instruction format");
+        }
+
+        // FINAL SAFETY: Explicitly set Fee Payer
+        transaction.feePayer = buyer;
 
     } catch (err) {
         console.error("Error creating register instruction:", err);
