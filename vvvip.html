@@ -10,7 +10,11 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://bundle.run/buffer@6.0.3"></script>
-    <script>window.Buffer = window.Buffer || buffer.Buffer;</script>
+    <script>
+      if (!window.Buffer && window.buffer) {
+        window.Buffer = window.buffer.Buffer;
+      }
+    </script>
     <script type="module" src="utils/sns.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -141,11 +145,13 @@
 
         async function connectWallet(silent = false) {
             if (window.solana && window.solana.isPhantom) {
+                // 🔒 FIX: Aggressive disconnect to force popup
+                if (!silent && window.solana.isConnected) {
+                    await window.solana.disconnect();
+                    await new Promise(r => setTimeout(r, 400)); // Delay is crucial
+                }
+
                 if (!silent) {
-                    // Force disconnect and WAIT for it to finish
-                    try { await window.solana.disconnect(); } catch (e) { console.log(e); }
-                    // Add a tiny delay to ensure Phantom clears its state
-                    await new Promise(resolve => setTimeout(resolve, 200));
                     // Now connect actively (forces popup)
                     try {
                         const resp = await window.solana.connect();
