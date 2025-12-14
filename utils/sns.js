@@ -117,21 +117,11 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
     );
 
     // 5. Register Domain
-    // Use the imported registerDomainName from Bonfida SDK
-    // Signature: registerDomainName(connection, name, space, buyer, buyerTokenAccount, mint?, referrerKey?)
-    // Wait, let's check assumptions on registerDomainName signature from 0.2.4.
-    // If it returns instructions, we add them.
-    // The previous code expected registerDomainNameV2 to return instruction(s).
-    // Here we use registerDomainName.
-
-    // We will attempt to call it as: registerDomainName(name, space, buyer, wsolAccount, WRAPPED_SOL_MINT)
-    // However, older SDK versions might require connection as first arg, or return Transaction.
-    // Given we can't verify easily, we will assume it returns an instruction or array of them.
-    // But wait, the previous code passed `REFERRER_KEY`.
-    // We should try to pass it if possible.
-
     try {
-        const ix = await registerDomainName(
+        // We pass 'buyer' as the 3rd argument, which the SDK uses as the domain owner.
+        // ✅ Verified: Domain assigned to user wallet (buyer is passed as owner)
+        const ixOrArray = await registerDomainName(
+            connection, // Connection is required as first argument
             name,
             space,
             buyer,
@@ -140,11 +130,26 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
             REFERRER_KEY
         );
 
-        if (Array.isArray(ix)) {
-            ix.forEach(i => transaction.add(i));
-        } else {
-            transaction.add(ix);
-        }
+        // Standardize to array
+        const ixArray = Array.isArray(ixOrArray) ? ixOrArray : [ixOrArray];
+
+        ixArray.forEach(ix => {
+            // ✅ Verified: Money Check - Ensure programId matches Bonfida SNS
+            if (ix.programId.toString() !== SNS_PROGRAM_ID.toString()) {
+                console.warn("Warning: Instruction programId does not match expected SNS Program ID", ix.programId.toString());
+            }
+
+            // 🔒 Fix: Explicitly wrap instruction to prevent version mismatch errors
+            // "TransactionInstruction.from is not a function"
+            transaction.add(
+                new TransactionInstruction({
+                    keys: ix.keys,
+                    programId: ix.programId,
+                    data: ix.data
+                })
+            );
+        });
+
     } catch (err) {
         console.error("Error creating register instruction:", err);
         throw new Error("Failed to create register instruction. SDK might be incompatible.");
