@@ -37,6 +37,8 @@ struct KernelString {
 
 typedef struct {
     curandState* states;
+    int gridSize;
+    int blockSize;
 } config;
 
 // Prototypes
@@ -114,40 +116,31 @@ unsigned long long int makeSeed() {
 void vanity_setup(config &vanity, int gpu_index) {
     CUDA_CHK(cudaSetDevice(gpu_index));
 
-    // Tunable grid sizing with safe defaults per device
-    const char* env_block = getenv("GPU_BLOCKSIZE");
-    const char* env_blocks_per_sm = getenv("GPU_BLOCKS_PER_SM");
-
-    int blockSize = env_block ? atoi(env_block) : 256; // threads per block
-    int blocks_per_sm = env_blocks_per_sm ? atoi(env_blocks_per_sm) : 0;
-
-    // Device-based defaults
     cudaDeviceProp device;
     CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
-    int major = device.major;
-    int minor = device.minor;
 
-    if (blocks_per_sm == 0) {
-        // Choose safe defaults:
-        // L4 (Ada, sm_89) -> more parallelism
-        // T4 (Turing, sm_75) -> conservative
-        if (major == 8 && minor >= 9) {
-            blocks_per_sm = 256;
-        } else if (major == 7 && minor == 5) {
-            blocks_per_sm = 128;
-        } else {
-            blocks_per_sm = 128; // fallback safe default
-        }
+    // --- Safe Grid Sizing ---
+    int minGridSize, bestBlockSize;
+    // We optimize for vanity_scan since it's the main kernel
+    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &bestBlockSize, vanity_scan, 0, 0);
+
+    // Hard cap of 32 blocks per SM is usually safe and performant
+    int numBlocks = device.multiProcessorCount * 32;
+
+    // Ensure numBlocks does not exceed 65535 for 1D grids compatibility/safety
+    if (numBlocks > 65535) {
+        numBlocks = 65535;
     }
 
-    // Safety caps
-    if (blockSize < 32) blockSize = 32;
-    if (blockSize > 1024) blockSize = 1024;
-    if (blocks_per_sm < 1) blocks_per_sm = 1;
-    if (blocks_per_sm > 2048) blocks_per_sm = 2048;
+    // Assign to config
+    vanity.gridSize = numBlocks;
+    vanity.blockSize = bestBlockSize;
 
-    int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
-    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+    // Safety checks for blockSize
+    if (vanity.blockSize < 32) vanity.blockSize = 32;
+    if (vanity.blockSize > 1024) vanity.blockSize = 1024;
+
+    size_t totalThreads = (size_t)vanity.gridSize * (size_t)vanity.blockSize;
 
     // Check curandState allocation vs available memory and reduce if necessary
     size_t req_bytes = totalThreads * sizeof(curandState);
@@ -155,18 +148,19 @@ void vanity_setup(config &vanity, int gpu_index) {
 #if CUDART_VERSION >= 10000
     cudaMemGetInfo(&freeMem, &totalMem);
 #endif
+    // If request > 80% of free memory
     if (freeMem > 0 && req_bytes > (freeMem * 8) / 10) {
         size_t allowedThreads = (freeMem * 8) / 10 / sizeof(curandState);
-        int new_blocks = (int)(allowedThreads / blockSize);
+        int new_blocks = (int)(allowedThreads / vanity.blockSize);
         if (new_blocks < 1) new_blocks = 1;
-        maxActiveBlocks = new_blocks;
-        totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
+        vanity.gridSize = new_blocks;
+        totalThreads = (size_t)vanity.gridSize * (size_t)vanity.blockSize;
+        req_bytes = totalThreads * sizeof(curandState);
     }
 
-    // Debug print to Cloud Run logs
-    printf("GPU: %s | compute=%d.%d | SMs=%d | blockSize=%d | blocks_per_sm=%d | blocks=%d | totalThreads=%zu | curand_bytes=%zu\n",
-           device.name, device.major, device.minor,
-           device.multiProcessorCount, blockSize, blocks_per_sm, maxActiveBlocks, totalThreads, req_bytes);
+    // Debug print
+    printf("GPU: %s | SMs=%d | blockSize=%d | gridSize=%d | totalThreads=%zu | curand_bytes=%zu\n",
+           device.name, device.multiProcessorCount, vanity.blockSize, vanity.gridSize, totalThreads, req_bytes);
     fflush(stdout);
 
     // allocate RNG state buffer for all threads
@@ -175,72 +169,24 @@ void vanity_setup(config &vanity, int gpu_index) {
     CUDA_CHK(cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int)));
     CUDA_CHK(cudaMemcpy(dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
-    // Ensure allocation uses exactly totalThreads * sizeof(curandState)
     CUDA_CHK(cudaMalloc((void**)&vanity.states, totalThreads * sizeof(curandState)));
-    vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states);
+
+    // Initialize RNG
+    vanity_init<<<vanity.gridSize, vanity.blockSize>>>(dev_rseed, vanity.states);
     CUDA_CHK(cudaDeviceSynchronize());
+
+    // Check for initialization errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Kernel launch error (init): %s\n", cudaGetErrorString(err));
+        exit(1);
+    }
 }
 
 void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString suffix) {
     CUDA_CHK(cudaSetDevice(gpu_index));
 
-    // Tunable grid sizing with safe defaults per device
-    const char* env_block = getenv("GPU_BLOCKSIZE");
-    const char* env_blocks_per_sm = getenv("GPU_BLOCKS_PER_SM");
-
-    int blockSize = env_block ? atoi(env_block) : 256; // threads per block
-    int blocks_per_sm = env_blocks_per_sm ? atoi(env_blocks_per_sm) : 0;
-
-    // Device-based defaults
-    cudaDeviceProp device;
-    CUDA_CHK(cudaGetDeviceProperties(&device, gpu_index));
-    int major = device.major;
-    int minor = device.minor;
-
-    if (blocks_per_sm == 0) {
-        // Choose safe defaults:
-        // L4 (Ada, sm_89) -> more parallelism
-        // T4 (Turing, sm_75) -> conservative
-        if (major == 8 && minor >= 9) {
-            blocks_per_sm = 256;
-        } else if (major == 7 && minor == 5) {
-            blocks_per_sm = 128;
-        } else {
-            blocks_per_sm = 128; // fallback safe default
-        }
-    }
-
-    // Safety caps
-    if (blockSize < 32) blockSize = 32;
-    if (blockSize > 1024) blockSize = 1024;
-    if (blocks_per_sm < 1) blocks_per_sm = 1;
-    if (blocks_per_sm > 2048) blocks_per_sm = 2048;
-
-    int maxActiveBlocks = device.multiProcessorCount * blocks_per_sm;
-    size_t totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
-
-    // Check curandState allocation vs available memory and reduce if necessary
-    size_t req_bytes = totalThreads * sizeof(curandState);
-    size_t freeMem = 0, totalMem = 0;
-#if CUDART_VERSION >= 10000
-    cudaMemGetInfo(&freeMem, &totalMem);
-#endif
-    if (freeMem > 0 && req_bytes > (freeMem * 8) / 10) {
-        size_t allowedThreads = (freeMem * 8) / 10 / sizeof(curandState);
-        int new_blocks = (int)(allowedThreads / blockSize);
-        if (new_blocks < 1) new_blocks = 1;
-        maxActiveBlocks = new_blocks;
-        totalThreads = (size_t)maxActiveBlocks * (size_t)blockSize;
-    }
-
-    // Debug print to Cloud Run logs
-    printf("GPU: %s | compute=%d.%d | SMs=%d | blockSize=%d | blocks_per_sm=%d | blocks=%d | totalThreads=%zu | curand_bytes=%zu\n",
-           device.name, device.major, device.minor,
-           device.multiProcessorCount, blockSize, blocks_per_sm, maxActiveBlocks, totalThreads, req_bytes);
-    fflush(stdout);
-
-    printf("Launching kernel with blockSize=%d, blocks=%d (SMs=%d)\n",
-       blockSize, maxActiveBlocks, device.multiProcessorCount);
+    printf("Launching kernel with blockSize=%d, gridSize=%d\n", vanity.blockSize, vanity.gridSize);
     fflush(stdout);
 
     int keys_found_total = 0;
@@ -257,14 +203,24 @@ void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString
     CUDA_CHK(cudaMemset(dev_keys_found, 0, sizeof(int)));
 
     unsigned long long total_checked = 0;
+    size_t totalThreads = (size_t)vanity.gridSize * (size_t)vanity.blockSize;
 
     for (int i = 0; i < MAX_ITERATIONS; ++i) {
         auto start = std::chrono::high_resolution_clock::now();
         CUDA_CHK(cudaMemset(dev_executions_this_gpu, 0, sizeof(int)));
 
-        vanity_scan<<<maxActiveBlocks, blockSize>>>(vanity.states, dev_keys_found, dev_g, dev_executions_this_gpu, prefix, suffix);
+        vanity_scan<<<vanity.gridSize, vanity.blockSize>>>(vanity.states, dev_keys_found, dev_g, dev_executions_this_gpu, prefix, suffix);
 
+        // --- Crash Detection ---
         CUDA_CHK(cudaDeviceSynchronize());
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Kernel launch error: %s\n", cudaGetErrorString(err));
+            exit(1);
+        }
+        // -----------------------
+
         auto end = std::chrono::high_resolution_clock::now();
 
         std::chrono::duration<double> diff = end - start;
@@ -281,7 +237,7 @@ void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString
         fflush(stdout);
 
         CUDA_CHK(cudaMemcpy(&keys_found_this_iteration, dev_keys_found, sizeof(int), cudaMemcpyDeviceToHost));
-        keys_found_total = keys_found_this_iteration; // since atomicAdd accumulates
+        keys_found_total = keys_found_this_iteration;
 
         if (keys_found_total >= STOP_AFTER_KEYS_FOUND) {
             exit(0);
