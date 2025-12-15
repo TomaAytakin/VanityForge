@@ -67,6 +67,7 @@ async function checkDomainAvailability(domainName) {
 
 /**
  * Creates a transaction to register a domain with SNS.
+ * MODIFIED: Returns { transaction, signers } and DOES NOT partially sign.
  */
 async function createRegisterTransaction(connection, wallet, domainName, space = 1000) {
     // Clean domain name
@@ -183,9 +184,6 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
             throw new Error("Unsupported SNS instruction format");
         }
 
-        // Final Safety: Explicitly set fee payer
-        transaction.feePayer = buyer;
-
     } catch (err) {
         console.error("Error creating register instruction:", err);
         throw new Error("Failed to create register instruction. SDK might be incompatible.");
@@ -204,21 +202,11 @@ async function createRegisterTransaction(connection, wallet, domainName, space =
         })
     );
 
-    // Adapting for specific instructions
-    const buyerPublicKey = buyer;
-    const signers = [wsolKeypair];
-
-    // 🔒 Transaction invariants (REQUIRED FIX)
-    transaction.feePayer = buyerPublicKey;
-    const { blockhash } = await connection.getLatestBlockhash("finalized");
-    transaction.recentBlockhash = blockhash;
-
-    // Now it is safe to sign
-    if (signers && signers.length > 0) {
-        transaction.partialSign(...signers);
-    }
-
-    return transaction;
+    // Return transaction and signers without signing
+    return {
+        transaction,
+        signers: [wsolKeypair]
+    };
 }
 
 // --- View/Controller Logic moved from HTML ---
@@ -302,23 +290,49 @@ async function buyDomain(domain) {
         const connection = new Connection(window.SOLANA_RPC);
 
         // Create Transaction
-        const transaction = await createRegisterTransaction(connection, { publicKey: wallet }, domain, 1000);
+        // Destructure to get transaction and signers
+        const { transaction, signers } = await createRegisterTransaction(connection, { publicKey: wallet }, domain, 1000);
 
-        // Sign and Send
+        // --- ROBUST SIGNING FLOW START ---
+
+        // A. SETUP
         transaction.feePayer = wallet;
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("finalized");
         transaction.recentBlockhash = blockhash;
 
-        // Use Phantom's window.solana to sign
-        const { signature } = await window.solana.signAndSendTransaction(transaction);
+        // B. PARTIAL SIGN (With Sanitized Keys)
+        // Convert SDK "Alien" Keypairs to "Native" Keypairs
+        const validSigners = signers.map(s => {
+            return (s.secretKey) ? Keypair.fromSecretKey(s.secretKey) : s;
+        });
+
+        if (validSigners.length > 0) {
+            transaction.partialSign(...validSigners);
+        }
+
+        // C. USER SIGN (Ask Phantom to just sign, not send)
+        // This isolates the signing error from the network error
+        const signedTx = await window.solana.signTransaction(transaction);
 
         if (btn) btn.innerHTML = 'Confirming...';
 
+        // D. RAW SEND (We send it ourselves via Helius)
+        const rawTx = signedTx.serialize();
+        const signature = await connection.sendRawTransaction(rawTx, {
+            skipPreflight: false, // verification
+            preflightCommitment: 'confirmed'
+        });
+
+        console.log("🚀 Sent! Signature:", signature);
+
+        // E. CONFIRM
         await connection.confirmTransaction({
             signature: signature,
             blockhash: blockhash,
             lastValidBlockHeight: lastValidBlockHeight
-        });
+        }, 'confirmed');
+
+        // --- ROBUST SIGNING FLOW END ---
 
         alert("Success! Domain registered. Signature: " + signature);
         location.reload();
