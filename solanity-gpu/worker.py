@@ -107,6 +107,22 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
         return None, None
 
 if __name__ == "__main__":
+    # Startup Diagnostics
+    print("🩺 DIAGNOSTIC: Checking GPU Health...")
+    try:
+        subprocess.run(["nvidia-smi"], check=False)
+    except FileNotFoundError:
+        logging.error("nvidia-smi not found. Ensure the container has GPU access.")
+    except Exception as e:
+        logging.error(f"Error running nvidia-smi: {e}")
+
+    try:
+        subprocess.run(["nvcc", "--version"], check=False)
+    except FileNotFoundError:
+        logging.warning("nvcc not found. This may be normal in runtime containers.")
+    except Exception as e:
+        logging.error(f"Error running nvcc: {e}")
+
     TASK_JOB_ID = os.environ.get("TASK_JOB_ID")
     TASK_PREFIX = os.environ.get("TASK_PREFIX", "")
     TASK_SUFFIX = os.environ.get("TASK_SUFFIX", "")
