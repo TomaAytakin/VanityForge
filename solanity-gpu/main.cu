@@ -270,6 +270,7 @@ void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* 
 
     sha512_context md;
 
+    #pragma unroll
     for (int attempts = 0; attempts < ATTEMPTS_PER_EXECUTION; ++attempts) {
         // Optimized SHA512 (Inlined from original vanity.cu)
         md.curlen = 0; md.length = 0;
@@ -297,8 +298,11 @@ void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* 
 
         uint64_t S[8], W[80], t0, t1;
         int i;
+        #pragma unroll
         for (i = 0; i < 8; i++) S[i] = md.state[i];
+        #pragma unroll
         for (i = 0; i < 16; i++) LOAD64H(W[i], md.buf + (8*i));
+        #pragma unroll
         for (i = 16; i < 80; i++) W[i] = Gamma1(W[i - 2]) + W[i - 7] + Gamma0(W[i - 15]) + W[i - 16];
 
         #define RND(a,b,c,d,e,f,g,h,i) \
@@ -307,6 +311,7 @@ void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* 
         d += t0; \
         h  = t0 + t1;
 
+        #pragma unroll
         for (i = 0; i < 80; i += 8) {
             RND(S[0],S[1],S[2],S[3],S[4],S[5],S[6],S[7],i+0);
             RND(S[7],S[0],S[1],S[2],S[3],S[4],S[5],S[6],i+1);
@@ -379,6 +384,7 @@ void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* 
         }
 
         // Increment Seed
+        #pragma unroll
         for (int i = 0; i < 32; ++i) {
             if (seed[i] == 255) {
                 seed[i] = 0;
