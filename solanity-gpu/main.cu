@@ -23,11 +23,12 @@
 #include "ge.cu"
 #include "sha512.cu"
 #include "verify.cu"
+#include <chrono>
 
 // Constants replacing config.h
 #define MAX_ITERATIONS 2000000000
 #define STOP_AFTER_KEYS_FOUND 1
-#define ATTEMPTS_PER_EXECUTION 100000
+#define ATTEMPTS_PER_EXECUTION 4096
 
 struct KernelString {
     char data[16];
@@ -255,12 +256,29 @@ void vanity_run(config &vanity, int gpu_index, KernelString prefix, KernelString
     CUDA_CHK(cudaMemcpy(dev_g, &gpu_index, sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHK(cudaMemset(dev_keys_found, 0, sizeof(int)));
 
+    unsigned long long total_checked = 0;
+
     for (int i = 0; i < MAX_ITERATIONS; ++i) {
+        auto start = std::chrono::high_resolution_clock::now();
         CUDA_CHK(cudaMemset(dev_executions_this_gpu, 0, sizeof(int)));
 
         vanity_scan<<<maxActiveBlocks, blockSize>>>(vanity.states, dev_keys_found, dev_g, dev_executions_this_gpu, prefix, suffix);
 
         CUDA_CHK(cudaDeviceSynchronize());
+        auto end = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<double> diff = end - start;
+        double seconds = diff.count();
+        unsigned long long current_batch = (unsigned long long)totalThreads * ATTEMPTS_PER_EXECUTION;
+        total_checked += current_batch;
+
+        double speed_mh = 0.0;
+        if (seconds > 0) {
+            speed_mh = (double)current_batch / seconds / 1000000.0;
+        }
+
+        printf("Speed: %.2f MH/s | Total checked: %.2f B\n", speed_mh, (double)total_checked / 1000000000.0);
+        fflush(stdout);
 
         CUDA_CHK(cudaMemcpy(&keys_found_this_iteration, dev_keys_found, sizeof(int), cudaMemcpyDeviceToHost));
         keys_found_total = keys_found_this_iteration; // since atomicAdd accumulates
