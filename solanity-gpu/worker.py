@@ -52,45 +52,50 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
     logging.info(f"Starting GPU grinder with command: {' '.join(cmd)}")
 
     try:
-        # Run the command and capture output
-        # The binary prints JSON to stdout and exits with 0 on success
-        # check=False to handle return code manually
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
+        # Use Popen to stream stdout
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, # Merge stderr into stdout
+            text=True,
+            bufsize=1 # Line buffered
+        )
 
-        if result.returncode != 0:
-            logging.error(f"Binary Error: Return Code {result.returncode}")
-            logging.error(f"Stderr: {stderr}")
-            return None, None
+        final_json_str = ""
+        found_json = False
 
-        if not stdout:
-            logging.error("Binary Error: Empty stdout")
-            logging.error(f"Stderr: {stderr}")
-            return None, None
+        # Stream logs
+        for line in process.stdout:
+            line_str = line.strip()
+            if not line_str:
+                continue
 
-        # The stdout might contain other logs if not careful, but main.cu seems clean.
-        # Find the JSON part if there's noise?
-        try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError as e:
-            # Fallback: try to find the start and end of JSON
-            start = stdout.find('{')
-            end = stdout.rfind('}')
-            if start != -1 and end != -1:
-                try:
-                    json_str = stdout[start:end+1]
-                    data = json.loads(json_str)
-                except json.JSONDecodeError:
-                    logging.error(f"Error parsing GPU output: {e}")
-                    logging.error(f"Raw output: {stdout}")
-                    logging.error(f"Stderr: {stderr}")
-                    return None, None
+            # Check if this line is the JSON result
+            if '"public_key":' in line_str and '"secret_key":' in line_str:
+                final_json_str = line_str
+                found_json = True
+                logging.info(f"⛏️ GRINDER: KEY FOUND!")
             else:
-                logging.error(f"Error parsing GPU output: {e}")
-                logging.error(f"Raw output: {stdout}")
-                logging.error(f"Stderr: {stderr}")
-                return None, None
+                # Prepend timestamp
+                current_time = time.strftime("%H:%M:%S", time.localtime())
+                print(f"[{current_time}] ⛏️ GRINDER: {line_str}", flush=True)
+
+        process.wait()
+
+        if process.returncode != 0:
+            logging.error(f"Binary Error: Return Code {process.returncode}")
+            return None, None
+
+        if not found_json or not final_json_str:
+            logging.error("Binary finished but no JSON output found.")
+            return None, None
+
+        try:
+            data = json.loads(final_json_str)
+        except json.JSONDecodeError as e:
+             logging.error(f"Error parsing GPU output: {e}")
+             logging.error(f"Raw output: {final_json_str}")
+             return None, None
 
         address = data.get("public_key")
         secret_ints = data.get("secret_key")
