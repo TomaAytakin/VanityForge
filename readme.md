@@ -2,6 +2,10 @@
 
 ![VanityForge Main Banner](https://github.com/TomaAytakin/VanityForge/blob/main/assets/readmeherobanner.png)
 
+![Solana Mainnet](https://img.shields.io/badge/Network-Solana_Mainnet-green?style=flat-square&logo=solana)
+![Bonfida SNS](https://img.shields.io/badge/Integration-Bonfida_SNS-blue?style=flat-square)
+![Security](https://img.shields.io/badge/Security-Glass_Box_Engine-shield?style=flat-square)
+
 Welcome to **VanityForge**. You have arrived at the *absolute pinnacle* of Solana address generation. We provide what others cannot: **Unmatched Speed**, <u>Military-Grade Security</u>, and **24/7 Reliability**.
 
 Stop settling for random addresses. Demand a customized identity that commands *respect* on the blockchain.
@@ -59,6 +63,12 @@ Our security stack is built on **Client-Derived Server-Side Encryption** (`vm_se
 * **Bcrypt PIN Hashing:** Your PIN is hashed using `bcrypt` before being stored.
 * **Ciphertext Storage:** The database receives **<u>ONLY</u>** the encrypted ciphertext.
 
+#### 🛡️ Transaction Safety Engine (New)
+Beyond encryption, we secure the *transaction* itself using a "Glass Box" philosophy:
+* **Manual Composition:** We do not rely on opaque SDK methods. Every transaction is manually composed and sanitized to prevent hidden malicious code.
+* **Instruction Sanitization:** All SNS instructions are flattened and inspected for strict program ID compliance before signing.
+* **Direct-to-RPC Injection:** We utilize **Helius Premium RPCs** injected securely from the backend to ensure zero-latency execution without exposing API keys.
+
 ---
 
 ## ☁️ "Fire and Forget" Cloud Persistence
@@ -83,6 +93,7 @@ Unlike browser-based generators that stop when your screen turns off, our engine
 We utilize a smart **"Hybrid Grinder"** model to balance cost and performance, orchestrated by our central server.
 
 *   **Frontend:** Pure Static HTML/JS. It interacts with the backend via REST API and listens to Firestore for real-time job updates.
+    *   Direct integration with Bonfida Solana Name Service (SNS) for immediate domain registration.
 *   **Backend:** A Python Flask Orchestrator (`vm_server.py`) acting as the command center.
 *   **Compute Engine:**
     *   **Local Grinder:** For standard jobs (<5 letters), we use optimized Python Multiprocessing directly on the server.
@@ -122,9 +133,9 @@ We have bridged the gap between Web2 ease-of-use and Web3 native value.
 *   **Dao Governance: $VFORGE holders vote on fee structures and new features.**
 
 ## 🛠️ The Stack
-* **Infrastructure:** Google Compute Engine, Cloud Run, Firestore.
+* **Infrastructure:** Google Compute Engine, Cloud Run, Helius RPC.
 * **Backend:** Python 3.11, Flask, Gunicorn, `Flask-Limiter`, `requests`.
-* **Frontend:** HTML5, Tailwind CSS, Firebase SDK, Solana Web3.js.
+* **Frontend:** HTML5, Tailwind CSS, Bonfida SNS SDK, Solana Web3.js v1.x.
 * **Security:** `cryptography` (Fernet), `bcrypt`, `flask-cors`.
 
 _____________________________________________________________________________________
