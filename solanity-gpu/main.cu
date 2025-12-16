@@ -38,6 +38,8 @@ struct Range {
     uint64_t max64[4];
 };
 
+__constant__ Range d_range;
+
 typedef struct {
     curandState* states;
     int gridSize;
@@ -161,7 +163,7 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
 void vanity_setup(config& vanity, int gpu_index);
 void vanity_run(config& vanity, int gpu_index, Range range, const char* prefix_str, const char* suffix_str);
 void __global__ vanity_init(unsigned long long int* seed, curandState* state);
-void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, SearchResult* result, int* execution_count, Range range);
+void __global__ __launch_bounds__(256, 2) __maxnreg__(96) vanity_scan(curandState* state, SearchResult* result, int* execution_count);
 
 int main(int argc, char const* argv[]) {
     // 1. Device Capability Check
@@ -208,8 +210,7 @@ int main(int argc, char const* argv[]) {
 
     if (!range_valid && memcmp(min_buf, max_buf, 32) != 0) {
          printf("Error: Impossible prefix range.\n");
-         // exit(1);
-         // Allow running but it won't find anything
+         exit(1);
     }
 
     // Convert to Range struct with pre-swapped endianness
@@ -298,6 +299,7 @@ void vanity_setup(config &vanity, int gpu_index) {
 
 void vanity_run(config &vanity, int gpu_index, Range range, const char* prefix_str, const char* suffix_str) {
     CUDA_CHK(cudaSetDevice(gpu_index));
+    CUDA_CHK(cudaMemcpyToSymbol(d_range, &range, sizeof(Range)));
 
     int* dev_executions_this_gpu;
     CUDA_CHK(cudaMalloc((void**)&dev_executions_this_gpu, sizeof(int)));
@@ -310,7 +312,7 @@ void vanity_run(config &vanity, int gpu_index, Range range, const char* prefix_s
         auto start = std::chrono::high_resolution_clock::now();
 
         // Launch Kernel
-        vanity_scan<<<vanity.gridSize, vanity.blockSize>>>(vanity.states, vanity.result, dev_executions_this_gpu, range);
+        vanity_scan<<<vanity.gridSize, vanity.blockSize>>>(vanity.states, vanity.result, dev_executions_this_gpu);
 
         CUDA_CHK(cudaDeviceSynchronize());
 
@@ -389,7 +391,7 @@ void __global__ vanity_init(unsigned long long int* rseed, curandState* state) {
     curand_init(*rseed + id, id, 0, &state[id]);
 }
 
-void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, SearchResult* result, int* exec_count, Range range) {
+void __global__ __launch_bounds__(256, 2) __maxnreg__(96) vanity_scan(curandState* state, SearchResult* result, int* exec_count) {
     int id = threadIdx.x + (blockIdx.x * blockDim.x);
     // atomicAdd(exec_count, 1); // Optional profiling
 
@@ -480,31 +482,31 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
         // 1. Fast Fail
         // Swap bytes to ensure Big-endian lexicographical comparison on Little-endian GPU
         uint64_t p0 = bswap64(pub64[0]);
-        // range values are already swapped on host
+        // d_range values are already swapped on host
 
-        if (p0 < range.min64[0] || p0 > range.max64[0]) {
+        if (p0 < d_range.min64[0] || p0 > d_range.max64[0]) {
             goto increment_seed;
         }
 
         {
             // 2. Full Lexicographical Compare
             // Check >= Min
-            bool ge_min = true;
+            int ge_min = 1;
             #pragma unroll
             for (int i = 0; i < 4; i++) {
                 uint64_t p = bswap64(pub64[i]);
-                if (p > range.min64[i]) break;
-                if (p < range.min64[i]) { ge_min = false; break; }
+                if (p > d_range.min64[i]) break;
+                if (p < d_range.min64[i]) { ge_min = 0; break; }
             }
             if (!ge_min) goto increment_seed;
 
             // Check <= Max
-            bool le_max = true;
+            int le_max = 1;
             #pragma unroll
             for (int i = 0; i < 4; i++) {
                 uint64_t p = bswap64(pub64[i]);
-                if (p < range.max64[i]) break;
-                if (p > range.max64[i]) { le_max = false; break; }
+                if (p < d_range.max64[i]) break;
+                if (p > d_range.max64[i]) { le_max = 0; break; }
             }
             if (!le_max) goto increment_seed;
         }
