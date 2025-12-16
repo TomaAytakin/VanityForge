@@ -4,7 +4,10 @@
 NVCC := nvcc
 
 # Flags
-NVCC_FLAGS := -O3 -gencode arch=compute_89,code=sm_89 -gencode arch=compute_86,code=sm_86
+# Added --use_fast_math and --ptxas-options=-v for performance tuning
+# -O3 is already level 3 optimization
+# Target sm_89 (Ada Lovelace / L4)
+NVCC_FLAGS := -O3 --use_fast_math --ptxas-options=-v -gencode arch=compute_89,code=sm_89 -gencode arch=compute_86,code=sm_86
 
 # Target
 TARGET := solanity
