@@ -96,7 +96,7 @@ static const uint64_t K_DEF K[80] = {
 #endif
 
 /* compress 1024-bits */
-static int __device__ __host__ sha512_compress(sha512_context *md, unsigned char *buf)
+static int __forceinline__ __device__ __host__ sha512_compress(sha512_context *md, unsigned char *buf)
 {
     uint64_t S[8], W[80], t0, t1;
     int i;
@@ -152,7 +152,7 @@ static int __device__ __host__ sha512_compress(sha512_context *md, unsigned char
    @param md   The hash state you wish to initialize
    @return 0 if successful
 */
-int __device__ __host__ sha512_init(sha512_context * md) {
+int __forceinline__ __device__ __host__ sha512_init(sha512_context * md) {
     if (md == NULL) return 1;
 
     md->curlen = 0;

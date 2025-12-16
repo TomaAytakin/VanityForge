@@ -45,8 +45,8 @@ typedef struct {
 void vanity_setup(config& vanity, int gpu_index);
 void vanity_run(config& vanity, int gpu_index, KernelString prefix, KernelString suffix);
 void __global__ vanity_init(unsigned long long int* seed, curandState* state);
-void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* execution_count, KernelString prefix, KernelString suffix);
-bool __device__ b58enc(char* b58, size_t* b58sz, uint8_t* data, size_t binsz);
+void __global__ __launch_bounds__(256, 4) vanity_scan(curandState* state, int* keys_found, int* gpu, int* execution_count, KernelString prefix, KernelString suffix);
+bool __forceinline__ __device__ b58enc(char* b58, size_t* b58sz, uint8_t* data, size_t binsz);
 
 int main(int argc, char const* argv[]) {
     // 1. Device Capability Check
@@ -250,7 +250,7 @@ void __global__ vanity_init(unsigned long long int* rseed, curandState* state) {
     curand_init(*rseed + id, id, 0, &state[id]);
 }
 
-void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* exec_count, KernelString prefix, KernelString suffix) {
+void __global__ __launch_bounds__(256, 4) vanity_scan(curandState* state, int* keys_found, int* gpu, int* exec_count, KernelString prefix, KernelString suffix) {
     int id = threadIdx.x + (blockIdx.x * blockDim.x);
     atomicAdd(exec_count, 1);
 
@@ -398,7 +398,7 @@ void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* 
     state[id] = localState;
 }
 
-bool __device__ b58enc(char *b58, size_t *b58sz, uint8_t *data, size_t binsz) {
+bool __forceinline__ __device__ b58enc(char *b58, size_t *b58sz, uint8_t *data, size_t binsz) {
     const char b58digits_ordered[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     const uint8_t *bin = data;
     int carry;

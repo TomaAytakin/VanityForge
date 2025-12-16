@@ -8,7 +8,7 @@
 r = p + q
 */
 
-void __host__ __device__ ge_add(ge_p1p1 *r, const ge_p3 *p, const ge_cached *q) {
+void __forceinline__ __host__ __device__ ge_add(ge_p1p1 *r, const ge_p3 *p, const ge_cached *q) {
     fe t0;
     fe_add(r->X, p->Y, p->X);
     fe_sub(r->Y, p->Y, p->X);
@@ -24,7 +24,7 @@ void __host__ __device__ ge_add(ge_p1p1 *r, const ge_p3 *p, const ge_cached *q) 
 }
 
 
-static void __host__ __device__ slide(signed char *r, const unsigned char *a) {
+static void __forceinline__ __host__ __device__ slide(signed char *r, const unsigned char *a) {
     int i;
     int b;
     int k;
@@ -66,7 +66,7 @@ and b = b[0]+256*b[1]+...+256^31 b[31].
 B is the Ed25519 base point (x,4/5) with x positive.
 */
 
-void __host__ __device__ ge_double_scalarmult_vartime(ge_p2 *r, const unsigned char *a, const ge_p3 *A, const unsigned char *b) {
+void __forceinline__ __host__ __device__ ge_double_scalarmult_vartime(ge_p2 *r, const unsigned char *a, const ge_p3 *A, const unsigned char *b) {
     signed char aslide[256];
     signed char bslide[256];
     ge_cached Ai[8]; /* A,3A,5A,7A,9A,11A,13A,15A */
@@ -140,7 +140,7 @@ static const __device__ fe sqrtm1 = {
     -32595792, -7943725, 9377950, 3500415, 12389472, -272473, -25146209, -2005654, 326686, 11406482
 };
 
-int __device__ __host__ ge_frombytes_negate_vartime(ge_p3 *h, const unsigned char *s) {
+int __forceinline__ __device__ __host__ ge_frombytes_negate_vartime(ge_p3 *h, const unsigned char *s) {
     fe u;
     fe v;
     fe v3;
@@ -187,7 +187,7 @@ int __device__ __host__ ge_frombytes_negate_vartime(ge_p3 *h, const unsigned cha
 r = p + q
 */
 
-void __host__ __device__ ge_madd(ge_p1p1 *r, const ge_p3 *p, const ge_precomp *q) {
+void __forceinline__ __host__ __device__ ge_madd(ge_p1p1 *r, const ge_p3 *p, const ge_precomp *q) {
     fe t0;
     fe_add(r->X, p->Y, p->X);
     fe_sub(r->Y, p->Y, p->X);
@@ -206,7 +206,7 @@ void __host__ __device__ ge_madd(ge_p1p1 *r, const ge_p3 *p, const ge_precomp *q
 r = p - q
 */
 
-void __host__ __device__ ge_msub(ge_p1p1 *r, const ge_p3 *p, const ge_precomp *q) {
+void __forceinline__ __host__ __device__ ge_msub(ge_p1p1 *r, const ge_p3 *p, const ge_precomp *q) {
     fe t0;
 
     fe_add(r->X, p->Y, p->X);
@@ -226,7 +226,7 @@ void __host__ __device__ ge_msub(ge_p1p1 *r, const ge_p3 *p, const ge_precomp *q
 r = p
 */
 
-void __host__ __device__ ge_p1p1_to_p2(ge_p2 *r, const ge_p1p1 *p) {
+void __forceinline__ __host__ __device__ ge_p1p1_to_p2(ge_p2 *r, const ge_p1p1 *p) {
     fe_mul(r->X, p->X, p->T);
     fe_mul(r->Y, p->Y, p->Z);
     fe_mul(r->Z, p->Z, p->T);
@@ -238,7 +238,7 @@ void __host__ __device__ ge_p1p1_to_p2(ge_p2 *r, const ge_p1p1 *p) {
 r = p
 */
 
-void __host__ __device__ ge_p1p1_to_p3(ge_p3 *r, const ge_p1p1 *p) {
+void __forceinline__ __host__ __device__ ge_p1p1_to_p3(ge_p3 *r, const ge_p1p1 *p) {
     fe_mul(r->X, p->X, p->T);
     fe_mul(r->Y, p->Y, p->Z);
     fe_mul(r->Z, p->Z, p->T);
@@ -246,7 +246,7 @@ void __host__ __device__ ge_p1p1_to_p3(ge_p3 *r, const ge_p1p1 *p) {
 }
 
 
-void __host__ __device__ ge_p2_0(ge_p2 *h) {
+void __forceinline__ __host__ __device__ ge_p2_0(ge_p2 *h) {
     fe_0(h->X);
     fe_1(h->Y);
     fe_1(h->Z);
@@ -258,7 +258,7 @@ void __host__ __device__ ge_p2_0(ge_p2 *h) {
 r = 2 * p
 */
 
-void __host__ __device__ ge_p2_dbl(ge_p1p1 *r, const ge_p2 *p) {
+void __forceinline__ __host__ __device__ ge_p2_dbl(ge_p1p1 *r, const ge_p2 *p) {
     fe t0;
 
     fe_sq(r->X, p->X);
@@ -273,7 +273,7 @@ void __host__ __device__ ge_p2_dbl(ge_p1p1 *r, const ge_p2 *p) {
 }
 
 
-void __host__ __device__ ge_p3_0(ge_p3 *h) {
+void __forceinline__ __host__ __device__ ge_p3_0(ge_p3 *h) {
     fe_0(h->X);
     fe_1(h->Y);
     fe_1(h->Z);
@@ -285,7 +285,7 @@ void __host__ __device__ ge_p3_0(ge_p3 *h) {
 r = 2 * p
 */
 
-void __host__ __device__ ge_p3_dbl(ge_p1p1 *r, const ge_p3 *p) {
+void __forceinline__ __host__ __device__ ge_p3_dbl(ge_p1p1 *r, const ge_p3 *p) {
     ge_p2 q;
     ge_p3_to_p2(&q, p);
     ge_p2_dbl(r, &q);
@@ -301,7 +301,7 @@ static const __device__ fe d2 = {
     -21827239, -5839606, -30745221, 13898782, 229458, 15978800, -12551817, -6495438, 29715968, 9444199
 };
 
-void __host__ __device__ ge_p3_to_cached(ge_cached *r, const ge_p3 *p) {
+void __forceinline__ __host__ __device__ ge_p3_to_cached(ge_cached *r, const ge_p3 *p) {
     fe_add(r->YplusX, p->Y, p->X);
     fe_sub(r->YminusX, p->Y, p->X);
     fe_copy(r->Z, p->Z);
@@ -313,14 +313,14 @@ void __host__ __device__ ge_p3_to_cached(ge_cached *r, const ge_p3 *p) {
 r = p
 */
 
-void ge_p3_to_p2(ge_p2 *r, const ge_p3 *p) {
+void __forceinline__ __host__ __device__ ge_p3_to_p2(ge_p2 *r, const ge_p3 *p) {
     fe_copy(r->X, p->X);
     fe_copy(r->Y, p->Y);
     fe_copy(r->Z, p->Z);
 }
 
 
-void ge_p3_tobytes(unsigned char *s, const ge_p3 *h) {
+void __forceinline__ __host__ __device__ ge_p3_tobytes(unsigned char *s, const ge_p3 *h) {
     fe recip;
     fe x;
     fe y;
@@ -332,7 +332,7 @@ void ge_p3_tobytes(unsigned char *s, const ge_p3 *h) {
 }
 
 
-static unsigned char __host__ __device__ equal(signed char b, signed char c) {
+static unsigned char __forceinline__ __host__ __device__ equal(signed char b, signed char c) {
     unsigned char ub = b;
     unsigned char uc = c;
     unsigned char x = ub ^ uc; /* 0: yes; 1..255: no */
@@ -342,20 +342,20 @@ static unsigned char __host__ __device__ equal(signed char b, signed char c) {
     return (unsigned char) y;
 }
 
-static unsigned char __host__ __device__ negative(signed char b) {
+static unsigned char __forceinline__ __host__ __device__ negative(signed char b) {
     uint64_t x = b; /* 18446744073709551361..18446744073709551615: yes; 0..255: no */
     x >>= 63; /* 1: yes; 0: no */
     return (unsigned char) x;
 }
 
-static void __host__ __device__ cmov(ge_precomp *t, const ge_precomp *u, unsigned char b) {
+static void __forceinline__ __host__ __device__ cmov(ge_precomp *t, const ge_precomp *u, unsigned char b) {
     fe_cmov(t->yplusx, u->yplusx, b);
     fe_cmov(t->yminusx, u->yminusx, b);
     fe_cmov(t->xy2d, u->xy2d, b);
 }
 
 
-static void __host__ __device__ select(ge_precomp *t, int pos, signed char b) {
+static void __forceinline__ __host__ __device__ select(ge_precomp *t, int pos, signed char b) {
     ge_precomp minust;
     unsigned char bnegative = negative(b);
     unsigned char babs = b - (((-bnegative) & b) << 1);
@@ -385,7 +385,7 @@ Preconditions:
   a[31] <= 127
 */
 
-void __device__ __host__ ge_scalarmult_base(ge_p3 *h, const unsigned char *a) {
+void __forceinline__ __device__ __host__ ge_scalarmult_base(ge_p3 *h, const unsigned char *a) {
     signed char e[64];
     signed char carry;
     ge_p1p1 r;
@@ -440,7 +440,7 @@ void __device__ __host__ ge_scalarmult_base(ge_p3 *h, const unsigned char *a) {
 r = p - q
 */
 
-void __host__ __device__ ge_sub(ge_p1p1 *r, const ge_p3 *p, const ge_cached *q) {
+void __forceinline__ __host__ __device__ ge_sub(ge_p1p1 *r, const ge_p3 *p, const ge_cached *q) {
     fe t0;
 
     fe_add(r->X, p->Y, p->X);
@@ -457,7 +457,7 @@ void __host__ __device__ ge_sub(ge_p1p1 *r, const ge_p3 *p, const ge_cached *q) 
 }
 
 
-void __host__ __device__ ge_tobytes(unsigned char *s, const ge_p2 *h) {
+void __forceinline__ __host__ __device__ ge_tobytes(unsigned char *s, const ge_p2 *h) {
     fe recip;
     fe x;
     fe y;
