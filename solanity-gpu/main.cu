@@ -163,7 +163,8 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
 void vanity_setup(config& vanity, int gpu_index);
 void vanity_run(config& vanity, int gpu_index, Range range, const char* prefix_str, const char* suffix_str);
 __global__ void vanity_init(unsigned long long int* seed, curandState* state);
-__global__ __launch_bounds__(256, 2) __maxnreg__(96) void vanity_scan(curandState* state, SearchResult* result, int* execution_count);
+// FIXED: Removed __maxnreg__ attribute
+__global__ __launch_bounds__(256, 2) void vanity_scan(curandState* state, SearchResult* result, int* execution_count);
 
 int main(int argc, char const* argv[]) {
     // 1. Device Capability Check
@@ -391,7 +392,8 @@ __global__ void vanity_init(unsigned long long int* rseed, curandState* state) {
     curand_init(*rseed + id, id, 0, &state[id]);
 }
 
-__global__ __launch_bounds__(256, 2) __maxnreg__(96) void vanity_scan(curandState* state, SearchResult* result, int* exec_count) {
+// FIXED: Removed __maxnreg__(96) because it caused compilation failure.
+__global__ __launch_bounds__(256, 2) void vanity_scan(curandState* state, SearchResult* result, int* exec_count) {
     int id = threadIdx.x + (blockIdx.x * blockDim.x);
     // atomicAdd(exec_count, 1); // Optional profiling
 
@@ -521,12 +523,6 @@ __global__ __launch_bounds__(256, 2) __maxnreg__(96) void vanity_scan(curandStat
 
 increment_seed:
         // --- Vectorized Seed Increment ---
-        // Treat seed as 4 x uint64_t (Little Endian machine)
-        // We want to increment the number.
-        // public key generation is deterministic from seed.
-        // The interpretation of seed as integer doesn't matter as long as it changes.
-        // We use simple 64-bit increment.
-
         uint64_t* seed64 = (uint64_t*)seed;
         #pragma unroll
         for(int k=0; k<4; k++) {
