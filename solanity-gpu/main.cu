@@ -373,6 +373,17 @@ void vanity_run(config &vanity, int gpu_index, Range range, const char* prefix_s
     }
 }
 
+// 1. Add Device-safe byte swap helper
+__device__ __forceinline__ uint64_t bswap64(uint64_t x) {
+    uint32_t hi = (uint32_t)(x >> 32);
+    uint32_t lo = (uint32_t)(x & 0xFFFFFFFF);
+
+    hi = __byte_perm(hi, 0, 0x0123);
+    lo = __byte_perm(lo, 0, 0x0123);
+
+    return ((uint64_t)lo << 32) | hi;
+}
+
 void __global__ vanity_init(unsigned long long int* rseed, curandState* state) {
     int id = threadIdx.x + (blockIdx.x * blockDim.x);
     curand_init(*rseed + id, id, 0, &state[id]);
@@ -468,7 +479,7 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
 
         // 1. Fast Fail
         // Swap bytes to ensure Big-endian lexicographical comparison on Little-endian GPU
-        uint64_t p0 = __builtin_bswap64(pub64[0]);
+        uint64_t p0 = bswap64(pub64[0]);
         // range values are already swapped on host
 
         if (p0 < range.min64[0] || p0 > range.max64[0]) {
@@ -481,7 +492,7 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
             bool ge_min = true;
             #pragma unroll
             for (int i = 0; i < 4; i++) {
-                uint64_t p = __builtin_bswap64(pub64[i]);
+                uint64_t p = bswap64(pub64[i]);
                 if (p > range.min64[i]) break;
                 if (p < range.min64[i]) { ge_min = false; break; }
             }
@@ -491,7 +502,7 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
             bool le_max = true;
             #pragma unroll
             for (int i = 0; i < 4; i++) {
-                uint64_t p = __builtin_bswap64(pub64[i]);
+                uint64_t p = bswap64(pub64[i]);
                 if (p < range.max64[i]) break;
                 if (p > range.max64[i]) { le_max = false; break; }
             }
