@@ -454,48 +454,54 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
         ge_scalarmult_base(&A, privatek);
         ge_p3_tobytes(publick, &A);
 
-        // --- Binary Range Check ---
-        // publick is 32 bytes (Big Endian representation of the key value? No, Ed25519 public key IS the bytes)
-        // Base58 treats these bytes as a Big Endian number.
-        // So we compare lexicographically.
+        const uint64_t* pub64 = reinterpret_cast<const uint64_t*>(publick);
+        const uint64_t* min64 = reinterpret_cast<const uint64_t*>(range.min);
+        const uint64_t* max64 = reinterpret_cast<const uint64_t*>(range.max);
 
-        bool in_range = true;
+        // 1. Fast Fail
+        // Swap bytes to ensure Big-endian lexicographical comparison on Little-endian GPU
+        uint64_t p0 = __builtin_bswap64(pub64[0]);
+        uint64_t min0 = __builtin_bswap64(min64[0]);
+        uint64_t max0 = __builtin_bswap64(max64[0]);
 
-        // Check Min (publick >= range.min)
-        // Scan for first difference
-        bool ge_min = true; // assume true until proven false
-        int cmp_min = 0; // 0 eq, 1 greater, -1 less
-        #pragma unroll
-        for (int k = 0; k < 32; k++) {
-            if (publick[k] > range.min[k]) { cmp_min = 1; break; }
-            if (publick[k] < range.min[k]) { cmp_min = -1; break; }
+        if (p0 < min0 || p0 > max0) {
+            goto increment_seed;
         }
-        if (cmp_min < 0) in_range = false;
 
-        if (in_range) {
-            // Check Max (publick <= range.max)
-            int cmp_max = 0;
+        {
+            // 2. Full Lexicographical Compare
+            // Check >= Min
+            bool ge_min = true;
             #pragma unroll
-            for (int k = 0; k < 32; k++) {
-                if (publick[k] < range.max[k]) { cmp_max = -1; break; }
-                if (publick[k] > range.max[k]) { cmp_max = 1; break; }
+            for (int i = 0; i < 4; i++) {
+                uint64_t p = __builtin_bswap64(pub64[i]);
+                uint64_t m = __builtin_bswap64(min64[i]);
+                if (p > m) break;
+                if (p < m) { ge_min = false; break; }
             }
-            if (cmp_max > 0) in_range = false;
+            if (!ge_min) goto increment_seed;
+
+            // Check <= Max
+            bool le_max = true;
+            #pragma unroll
+            for (int i = 0; i < 4; i++) {
+                uint64_t p = __builtin_bswap64(pub64[i]);
+                uint64_t m = __builtin_bswap64(max64[i]);
+                if (p < m) break;
+                if (p > m) { le_max = false; break; }
+            }
+            if (!le_max) goto increment_seed;
         }
 
-        if (in_range) {
-            // Found a match!
-            // Write to result using Atomic CAS to ensure only one thread writes (or first one)
-            if (atomicCAS(&result->found, 0, 1) == 0) {
-                #pragma unroll
-                for(int k=0; k<32; k++) result->pubkey[k] = publick[k];
-                #pragma unroll
-                for(int k=0; k<32; k++) result->seed[k] = seed[k];
-            }
-            // Do not break? Instructions say "Do NOT return early... Always continue attempts".
-            // We continue.
+        // Found a match!
+        if (atomicCAS(&result->found, 0, 1) == 0) {
+            #pragma unroll
+            for(int k=0; k<32; k++) result->pubkey[k] = publick[k];
+            #pragma unroll
+            for(int k=0; k<32; k++) result->seed[k] = seed[k];
         }
 
+increment_seed:
         // --- Vectorized Seed Increment ---
         // Treat seed as 4 x uint64_t (Little Endian machine)
         // We want to increment the number.
