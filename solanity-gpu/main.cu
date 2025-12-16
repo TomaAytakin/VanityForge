@@ -34,8 +34,8 @@ struct SearchResult {
 
 // Structure to pass target range to Device
 struct Range {
-    uint8_t min[32];
-    uint8_t max[32];
+    uint64_t min64[4];
+    uint64_t max64[4];
 };
 
 typedef struct {
@@ -187,27 +187,36 @@ int main(int argc, char const* argv[]) {
         }
     }
 
-    Range range;
-    memset(&range, 0, sizeof(Range));
-    memset(range.max, 0xFF, 32); // Default max
+    uint64_t min_buf[4] = {0};
+    uint64_t max_buf[4];
+    memset(max_buf, 0xFF, 32); // Default max
 
     if (prefix_str) {
-        compute_prefix_range(prefix_str, range.min, range.max);
+        compute_prefix_range(prefix_str, (uint8_t*)min_buf, (uint8_t*)max_buf);
     }
 
-    // Check for reversed range (impossible prefix)
-    // Simple 32-byte compare
+    // Check for reversed range (impossible prefix) using 8-bit arrays before swap
     bool range_valid = false;
+    uint8_t* p_min = (uint8_t*)min_buf;
+    uint8_t* p_max = (uint8_t*)max_buf;
+
     for(int i=0; i<32; i++) {
-        if (range.min[i] < range.max[i]) { range_valid = true; break; }
-        if (range.min[i] > range.max[i]) { range_valid = false; break; }
+        if (p_min[i] < p_max[i]) { range_valid = true; break; }
+        if (p_min[i] > p_max[i]) { range_valid = false; break; }
     }
     // If equal, it's valid (1 key)
 
-    if (!range_valid && memcmp(range.min, range.max, 32) != 0) {
+    if (!range_valid && memcmp(min_buf, max_buf, 32) != 0) {
          printf("Error: Impossible prefix range.\n");
          // exit(1);
          // Allow running but it won't find anything
+    }
+
+    // Convert to Range struct with pre-swapped endianness
+    Range range;
+    for (int i = 0; i < 4; i++) {
+        range.min64[i] = __builtin_bswap64(min_buf[i]);
+        range.max64[i] = __builtin_bswap64(max_buf[i]);
     }
 
     config vanity;
@@ -455,16 +464,14 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
         ge_p3_tobytes(publick, &A);
 
         const uint64_t* pub64 = reinterpret_cast<const uint64_t*>(publick);
-        const uint64_t* min64 = reinterpret_cast<const uint64_t*>(range.min);
-        const uint64_t* max64 = reinterpret_cast<const uint64_t*>(range.max);
+        // range.min64 and range.max64 are already aligned uint64_t[4] in the struct
 
         // 1. Fast Fail
         // Swap bytes to ensure Big-endian lexicographical comparison on Little-endian GPU
         uint64_t p0 = __builtin_bswap64(pub64[0]);
-        uint64_t min0 = __builtin_bswap64(min64[0]);
-        uint64_t max0 = __builtin_bswap64(max64[0]);
+        // range values are already swapped on host
 
-        if (p0 < min0 || p0 > max0) {
+        if (p0 < range.min64[0] || p0 > range.max64[0]) {
             goto increment_seed;
         }
 
@@ -475,9 +482,8 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
             #pragma unroll
             for (int i = 0; i < 4; i++) {
                 uint64_t p = __builtin_bswap64(pub64[i]);
-                uint64_t m = __builtin_bswap64(min64[i]);
-                if (p > m) break;
-                if (p < m) { ge_min = false; break; }
+                if (p > range.min64[i]) break;
+                if (p < range.min64[i]) { ge_min = false; break; }
             }
             if (!ge_min) goto increment_seed;
 
@@ -486,9 +492,8 @@ void __global__ __launch_bounds__(256, 2) vanity_scan(curandState* state, Search
             #pragma unroll
             for (int i = 0; i < 4; i++) {
                 uint64_t p = __builtin_bswap64(pub64[i]);
-                uint64_t m = __builtin_bswap64(max64[i]);
-                if (p < m) break;
-                if (p > m) { le_max = false; break; }
+                if (p < range.max64[i]) break;
+                if (p > range.max64[i]) { le_max = false; break; }
             }
             if (!le_max) goto increment_seed;
         }
