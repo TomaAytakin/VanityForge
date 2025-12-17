@@ -23,7 +23,7 @@
 
 #define MAX_ITERATIONS 2000000000
 #define STOP_AFTER_KEYS_FOUND 1
-#define ATTEMPTS_PER_EXECUTION 2048
+#define ATTEMPTS_PER_EXECUTION 512
 
 // Structure to report results from Device to Host
 struct SearchResult {
@@ -122,12 +122,14 @@ int b58dec_host(uint8_t *bin, size_t binsz, const char *b58) {
     return 0;
 }
 
+// Logic Fix 1: Smart Fallback
+// Try 44 chars, if overflow, try 43 chars.
 void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t target_max[32]) {
     char min_s[64];
     char max_s[64];
     size_t len = strlen(prefix);
 
-    // Default to 44, but prepare to fallback
+    // Default to 44, but prepare to fallback to 43 if 44 overflows
     size_t target_lens[] = {44, 43};
     bool success = false;
 
@@ -145,7 +147,7 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
         for(size_t i=len; i<target_len; i++) max_s[i] = 'z';
         max_s[target_len] = 0;
 
-        // Try Decode Min
+        // Try Decode Min. Trust b58dec_host return codes (0=success).
         int err1 = b58dec_host(target_min, 32, min_s);
         if (err1 == 0) {
             // Min is valid! Now decode Max.
@@ -157,6 +159,7 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
             success = true;
             break; // Found a valid range length
         }
+        // If err1 != 0 (e.g. -2 Overflow), we loop to try 43
     }
 
     if (!success) {
@@ -171,8 +174,8 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
 void vanity_setup(config& vanity, int gpu_index);
 void vanity_run(config& vanity, int gpu_index, Range range, const char* prefix_str, const char* suffix_str);
 __global__ void vanity_init(unsigned long long int* seed, curandState* state);
-// FIXED: Removed __maxnreg__ attribute
-__global__ __launch_bounds__(256, 2) void vanity_scan(curandState* state, SearchResult* result, int* execution_count);
+// Fix B: Relax launch bounds to 256, 1
+__global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, SearchResult* result, int* execution_count);
 
 int main(int argc, char const* argv[]) {
     // 1. Device Capability Check
@@ -400,10 +403,9 @@ __global__ void vanity_init(unsigned long long int* rseed, curandState* state) {
     curand_init(*rseed + id, id, 0, &state[id]);
 }
 
-// FIXED: Removed __maxnreg__(96) because it caused compilation failure.
-__global__ __launch_bounds__(256, 2) void vanity_scan(curandState* state, SearchResult* result, int* exec_count) {
+// Fix B: Relax launch bounds to 256, 1
+__global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, SearchResult* result, int* exec_count) {
     int id = threadIdx.x + (blockIdx.x * blockDim.x);
-    // atomicAdd(exec_count, 1); // Optional profiling
 
     ge_p3 A;
     curandState localState = state[id];
@@ -420,7 +422,7 @@ __global__ __launch_bounds__(256, 2) void vanity_scan(curandState* state, Search
 
     sha512_context md;
 
-    #pragma unroll
+    // Fix A: Remove #pragma unroll for the main loop
     for (int attempts = 0; attempts < ATTEMPTS_PER_EXECUTION; ++attempts) {
         // --- SHA512 ---
         md.curlen = 0; md.length = 0;
