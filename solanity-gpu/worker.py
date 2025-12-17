@@ -17,13 +17,10 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 # Initialize Firebase
-# Note: In Cloud Run, credentials are often auto-detected or passed via env var.
-# We use ApplicationDefault.
 cred = credentials.ApplicationDefault()
 try:
     firebase_admin.initialize_app(cred)
 except ValueError:
-    # Already initialized
     pass
 
 db = firestore.client()
@@ -36,14 +33,81 @@ def generate_key_from_pin(pin, user_id):
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
+def calculate_prefix_range(prefix_str):
+    """
+    Calculates the target u64 value and mask for the GPU filter based on the Base58 prefix.
+    """
+    if not prefix_str:
+        return 0, 0
+
+    # Base58 Alphabet
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+    # Calculate min: prefix + '1111...' (padding to ~44 chars, typical solana address)
+    # Calculate max: prefix + 'zzzz...'
+    # Typical address length is 32 bytes -> ~44 base58 chars.
+    target_len = 44
+    if len(prefix_str) > target_len:
+        target_len = len(prefix_str) # Should not happen
+
+    min_str = prefix_str.ljust(target_len, '1')
+    max_str = prefix_str.ljust(target_len, 'z')
+
+    try:
+        min_bytes = base58.b58decode(min_str)
+        max_bytes = base58.b58decode(max_str)
+
+        # Ensure 32 bytes. b58decode might return less if leading 1s (0s).
+        # We want top bytes.
+        # Pad left with 0s to 32 bytes
+        min_bytes = min_bytes.rjust(32, b'\0')
+        max_bytes = max_bytes.rjust(32, b'\0')
+
+        # Extract top 8 bytes (big endian for comparison)
+        min_val = int.from_bytes(min_bytes[:8], byteorder='big')
+        max_val = int.from_bytes(max_bytes[:8], byteorder='big')
+
+        # Calculate Common Prefix Mask
+        # XOR min and max. Bits that changed are 1.
+        diff = min_val ^ max_val
+
+        # Find highest set bit in diff.
+        # All bits ABOVE that are common.
+        if diff == 0:
+            mask = 0xFFFFFFFFFFFFFFFF
+        else:
+            # Power of 2 greater than diff
+            # Or scan from MSB.
+            # In Python, bit_length() gives bits required to represent.
+            # E.g. diff = 0b00101... -> bit_length = 3 (if 1 is at index 2).
+            # We want to clear bits from bit_length down to 0.
+            shift = diff.bit_length()
+            # Mask is all 1s shifted left by 'shift'.
+            # But wait, 64-bit mask.
+            mask = (0xFFFFFFFFFFFFFFFF << shift) & 0xFFFFFFFFFFFFFFFF
+
+        target = min_val & mask
+
+        return target, mask
+
+    except Exception as e:
+        logging.error(f"Error calculating prefix range: {e}")
+        return 0, 0
+
 def run_gpu_grinder(prefix, suffix, gpu_index=0):
-    # Call the solanity binary
-    # usage: ./solanity --prefix <p> --suffix <s> --gpu-index <idx>
-    # Note: We do not add a JSON flag because the binary outputs JSON by default on success.
     cmd = ["./solanity"]
 
-    if prefix:
-        cmd.extend(["--prefix", prefix])
+    prefix_val, mask_val = calculate_prefix_range(prefix)
+
+    if prefix_val != 0:
+        cmd.extend(["--prefix-val", hex(prefix_val)])
+        cmd.extend(["--mask-val", hex(mask_val)])
+        logging.info(f"GPU Filter: Prefix={hex(prefix_val)} Mask={hex(mask_val)}")
+    else:
+        logging.warning("GPU Filter: Passing 0 mask (Pass All). CPU will be overloaded!")
+        cmd.extend(["--prefix-val", "0"])
+        cmd.extend(["--mask-val", "0"])
+
     if suffix:
         cmd.extend(["--suffix", suffix])
 
@@ -52,31 +116,27 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
     logging.info(f"Starting GPU grinder with command: {' '.join(cmd)}")
 
     try:
-        # Use Popen to stream stdout
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, # Merge stderr into stdout
+            stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1 # Line buffered
+            bufsize=1
         )
 
         final_json_str = ""
         found_json = False
 
-        # Stream logs
         for line in process.stdout:
             line_str = line.strip()
             if not line_str:
                 continue
 
-            # Check if this line is the JSON result
             if '"public_key":' in line_str and '"secret_key":' in line_str:
                 final_json_str = line_str
                 found_json = True
                 logging.info(f"⛏️ GRINDER: KEY FOUND!")
             else:
-                # Prepend timestamp
                 current_time = time.strftime("%H:%M:%S", time.localtime())
                 print(f"[{current_time}] ⛏️ GRINDER: {line_str}", flush=True)
 
@@ -112,7 +172,6 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
         return None, None
 
 if __name__ == "__main__":
-    # Startup Diagnostics
     print("🩺 DIAGNOSTIC: Checking GPU Health...")
     try:
         subprocess.run(["nvidia-smi"], check=False)
@@ -131,13 +190,6 @@ if __name__ == "__main__":
     TASK_JOB_ID = os.environ.get("TASK_JOB_ID")
     TASK_PREFIX = os.environ.get("TASK_PREFIX", "")
     TASK_SUFFIX = os.environ.get("TASK_SUFFIX", "")
-    # TASK_CASE not used in main.cu?
-    # Checking main.cu: it only takes prefix/suffix. It does case-sensitive check logic inside?
-    # main.cu:
-    # if (key[j] != prefix.data[j]) -> looks case sensitive.
-    # main.cu does NOT have --ignore-case flag implemented in argv parsing.
-    # Assuming case sensitive is always enforced or handled by prefix/suffix casing passed in.
-
     TASK_PIN = os.environ.get("TASK_PIN")
     TASK_USER_ID = os.environ.get("TASK_USER_ID")
 
@@ -148,32 +200,22 @@ if __name__ == "__main__":
     logging.info(f"Worker started for Job ID: {TASK_JOB_ID}")
 
     try:
-        # Update Firestore job status to 'RUNNING' (if not already)
         job_ref = db.collection('vanity_jobs').document(TASK_JOB_ID)
-        # We might not need to set running here if VM server did it, but it's safe.
-        # However, vm_server.py does set it to RUNNING before dispatching?
-        # Yes: db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
-
-        # Call grinder
         address, secret = run_gpu_grinder(TASK_PREFIX, TASK_SUFFIX)
 
         if address and secret:
-            # Encrypt the resulting private key
             key = generate_key_from_pin(TASK_PIN, TASK_USER_ID)
             enc_key = Fernet(key).encrypt(secret.encode()).decode()
 
-            # Retry loop for Firestore update
             success = False
             for attempt in range(5):
                 try:
-                    # Update Firestore job status to 'COMPLETED' with the result
                     job_ref.update({
                         'status': 'COMPLETED',
                         'public_key': address,
                         'secret_key': enc_key,
                         'completed_at': firestore.SERVER_TIMESTAMP
                     })
-                    # Force a synchronous blocking read to ensure data is committed before exiting
                     job_ref.get()
                     logging.info("INFO: FOUND_KEY_UPDATE_SUCCESS")
                     logging.info(f"Job {TASK_JOB_ID} completed successfully. Address: {address}")
@@ -181,7 +223,7 @@ if __name__ == "__main__":
                     break
                 except Exception as update_err:
                     logging.warning(f"Warning: Firestore update failed (attempt {attempt+1}/5): {update_err}")
-                    time.sleep(2 ** attempt) # Exponential backoff
+                    time.sleep(2 ** attempt)
 
             if not success:
                 logging.error("ERROR: FIRESTORE_UPDATE_FAILED")
