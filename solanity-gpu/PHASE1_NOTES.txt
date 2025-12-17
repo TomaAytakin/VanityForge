@@ -1,0 +1,38 @@
+# Phase 1: High-Throughput SHA-512 Filter Implementation Notes
+
+## Architectural Pivot
+This update implements the "Two-Phase" architecture to overcome the register pressure bottleneck (~128 registers/thread) encountered when mixing SHA-512 and Ed25519 ECC in a single kernel.
+
+### Phase 1 (Implemented)
+- **Role:** Pure SHA-512 Filter.
+- **Goal:** Filter potential candidates based on SHA-512 digest properties before expensive ECC operations.
+- **Kernel:** `phase1_filter_kernel`
+- **Register Target:** < 64 registers per thread.
+- **Throughput Target:** > 300 MH/s (Theoretical peak for pure SHA-512 on L4 is >10 GH/s).
+- **Output:** Ring Buffer (`DeviceRingBuffer`) containing seeds (indices) of matches.
+
+### Phase 2 (Implemented on Host)
+- **Role:** Full Solver.
+- **Goal:** Consume candidates from Ring Buffer, derive Public Key, and check Base58 Suffix.
+- **Implementation:** Host-side C++ loop using `sha512` and `ge_scalarmult_base`.
+- **Latency:** Decoupled from GPU kernel loop to prevent stalling.
+
+### Removed Components (From Kernel)
+The following were removed from Phase 1 to ensure zero spills and maximum occupancy:
+1. **Ed25519 (ECC):**
+   - Reason: Scalar multiplication (`ge_scalarmult_base`) is register-heavy and caused spilling (296B stores / 268B loads).
+   - Impact: Moved to Phase 2 (Host).
+2. **Base58 Encoding:**
+   - Reason: String manipulation and large lookup tables in kernel consume registers and local memory.
+   - Impact: Moved to Phase 2 (Host).
+3. **Curand:**
+   - Reason: State overhead.
+   - Impact: Replaced with deterministic strided index generation (`base_seed + thread_idx`).
+
+### Register Usage Analysis
+*Note: `ptxas` could not be run in this environment, but the code is optimized for:*
+- **Rolling Schedule:** `W` array logic avoids storing 80 constants or full schedule.
+- **In-Place Updates:** `S` state is updated in registers.
+- **Minimal Locals:** Only `tid`, `current_idx`, `S[8]`, `W[16]`, and `K` (const) are used.
+- **Expected Usage:** ~48-56 registers.
+- **Spills:** 0 expected.
