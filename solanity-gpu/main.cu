@@ -109,8 +109,6 @@ int b58dec_host(uint8_t *bin, size_t binsz, const char *b58) {
     }
 
     // Check for overflow beyond binsz
-    // We are decoding to fixed 32 bytes (binsz).
-    // The number in 'buf' (64 bytes) must fit in last 'binsz' bytes.
     for(i = 0; i < 64 - binsz; i++) {
         if (buf[i] != 0) return -2; // Overflow
     }
@@ -123,13 +121,11 @@ int b58dec_host(uint8_t *bin, size_t binsz, const char *b58) {
 }
 
 // Logic Fix 1: Smart Fallback
-// Try 44 chars, if overflow, try 43 chars.
 void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t target_max[32]) {
     char min_s[64];
     char max_s[64];
     size_t len = strlen(prefix);
 
-    // Default to 44, but prepare to fallback to 43 if 44 overflows
     size_t target_lens[] = {44, 43};
     bool success = false;
 
@@ -137,34 +133,26 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
         size_t target_len = target_lens[k];
         if (len > target_len) continue;
 
-        // Construct Min String: Prefix + '1's
         strcpy(min_s, prefix);
         for(size_t i=len; i<target_len; i++) min_s[i] = '1';
         min_s[target_len] = 0;
 
-        // Construct Max String: Prefix + 'z's
         strcpy(max_s, prefix);
         for(size_t i=len; i<target_len; i++) max_s[i] = 'z';
         max_s[target_len] = 0;
 
-        // Try Decode Min. Trust b58dec_host return codes (0=success).
         int err1 = b58dec_host(target_min, 32, min_s);
         if (err1 == 0) {
-            // Min is valid! Now decode Max.
             int err2 = b58dec_host(target_max, 32, max_s);
             if (err2 != 0) {
-                // If max overflows, cap at 0xFF...FF
                 memset(target_max, 0xFF, 32);
             }
             success = true;
-            break; // Found a valid range length
+            break;
         }
-        // If err1 != 0 (e.g. -2 Overflow), we loop to try 43
     }
 
     if (!success) {
-        // Both 44 and 43 failed (or prefix was too long)
-        // Set to impossible range to trigger error in main
         memset(target_min, 0xFF, 32);
         memset(target_max, 0x00, 32);
     }
@@ -174,11 +162,9 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
 void vanity_setup(config& vanity, int gpu_index);
 void vanity_run(config& vanity, int gpu_index, Range range, const char* prefix_str, const char* suffix_str);
 __global__ void vanity_init(unsigned long long int* seed, curandState* state);
-// Fix B: Relax launch bounds to 256, 1
 __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, SearchResult* result, int* execution_count);
 
 int main(int argc, char const* argv[]) {
-    // 1. Device Capability Check
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     printf("GPU name: %s | Compute Capability: %d.%d\n",
@@ -203,13 +189,12 @@ int main(int argc, char const* argv[]) {
 
     uint64_t min_buf[4] = {0};
     uint64_t max_buf[4];
-    memset(max_buf, 0xFF, 32); // Default max
+    memset(max_buf, 0xFF, 32);
 
     if (prefix_str) {
         compute_prefix_range(prefix_str, (uint8_t*)min_buf, (uint8_t*)max_buf);
     }
 
-    // Check for reversed range (impossible prefix) using 8-bit arrays before swap
     bool range_valid = false;
     uint8_t* p_min = (uint8_t*)min_buf;
     uint8_t* p_max = (uint8_t*)max_buf;
@@ -218,14 +203,12 @@ int main(int argc, char const* argv[]) {
         if (p_min[i] < p_max[i]) { range_valid = true; break; }
         if (p_min[i] > p_max[i]) { range_valid = false; break; }
     }
-    // If equal, it's valid (1 key)
 
     if (!range_valid && memcmp(min_buf, max_buf, 32) != 0) {
          printf("Error: Impossible prefix range.\n");
          exit(1);
     }
 
-    // Convert to Range struct with pre-swapped endianness
     Range range;
     for (int i = 0; i < 4; i++) {
         range.min64[i] = __builtin_bswap64(min_buf[i]);
@@ -269,7 +252,6 @@ void vanity_setup(config &vanity, int gpu_index) {
 
     size_t totalThreads = (size_t)vanity.gridSize * (size_t)vanity.blockSize;
 
-    // Check memory for curand states
     size_t req_bytes = totalThreads * sizeof(curandState);
     size_t freeMem = 0, totalMem = 0;
 #if CUDART_VERSION >= 10000
@@ -300,7 +282,7 @@ void vanity_setup(config &vanity, int gpu_index) {
     vanity_init<<<vanity.gridSize, vanity.blockSize>>>(dev_rseed, vanity.states);
     CUDA_CHK(cudaDeviceSynchronize());
 
-    cudaFree(dev_rseed); // Cleanup seed
+    cudaFree(dev_rseed);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -323,7 +305,6 @@ void vanity_run(config &vanity, int gpu_index, Range range, const char* prefix_s
     for (int i = 0; i < MAX_ITERATIONS; ++i) {
         auto start = std::chrono::high_resolution_clock::now();
 
-        // Launch Kernel
         vanity_scan<<<vanity.gridSize, vanity.blockSize>>>(vanity.states, vanity.result, dev_executions_this_gpu);
 
         CUDA_CHK(cudaDeviceSynchronize());
@@ -346,16 +327,12 @@ void vanity_run(config &vanity, int gpu_index, Range range, const char* prefix_s
         printf("Speed: %.2f MH/s | Total checked: %.2f B\n", speed_mh, (double)total_checked / 1000000000.0);
         fflush(stdout);
 
-        // Check result
         CUDA_CHK(cudaMemcpy(&host_result, vanity.result, sizeof(SearchResult), cudaMemcpyDeviceToHost));
         if (host_result.found) {
-            // Match found by GPU (Prefix confirmed)
-            // Perform full verification on Host
             char b58_key[256];
             size_t b58_len = 256;
             b58enc_host(b58_key, &b58_len, host_result.pubkey, 32);
 
-            // Verify Suffix (if any)
             bool match = true;
             if (suffix_str && strlen(suffix_str) > 0) {
                 size_t key_len = strlen(b58_key);
@@ -367,7 +344,6 @@ void vanity_run(config &vanity, int gpu_index, Range range, const char* prefix_s
             }
 
             if (match) {
-                // Output JSON
                 printf("{\"public_key\": \"%s\", \"secret_key\": [", b58_key);
                 for(int n=0; n<32; n++) {
                     printf("%d,", host_result.seed[n]);
@@ -379,22 +355,17 @@ void vanity_run(config &vanity, int gpu_index, Range range, const char* prefix_s
                 fflush(stdout);
                 exit(0);
             } else {
-                // False positive (suffix didn't match), reset and continue
-                // Note: We might have missed other matches in this batch, but with high speed/randomness it's acceptable.
                 CUDA_CHK(cudaMemset(vanity.result, 0, sizeof(SearchResult)));
             }
         }
     }
 }
 
-// 1. Add Device-safe byte swap helper
 __device__ __forceinline__ uint64_t bswap64(uint64_t x) {
     uint32_t hi = (uint32_t)(x >> 32);
     uint32_t lo = (uint32_t)(x & 0xFFFFFFFF);
-
     hi = __byte_perm(hi, 0, 0x0123);
     lo = __byte_perm(lo, 0, 0x0123);
-
     return ((uint64_t)lo << 32) | hi;
 }
 
@@ -403,8 +374,7 @@ __global__ void vanity_init(unsigned long long int* rseed, curandState* state) {
     curand_init(*rseed + id, id, 0, &state[id]);
 }
 
-// Fix B: Relax launch bounds to 256, 1
-__global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, SearchResult* result, int* exec_count) {
+__global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, SearchResult* result, int* execution_count) {
     int id = threadIdx.x + (blockIdx.x * blockDim.x);
 
     ge_p3 A;
@@ -414,17 +384,16 @@ __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, Search
     __align__(8) unsigned char publick[32] = {0};
     unsigned char privatek[64] = {0};
 
-    // Initialize seed from state
-    for (int i = 0; i < 32; ++i) {
-        float random = curand_uniform(&localState);
-        seed[i] = (uint8_t)(random * 255);
+    // Optimization 3: Fast Seed Generation using curand() (uint32)
+    uint32_t* seed32 = (uint32_t*)seed;
+    #pragma unroll
+    for (int i = 0; i < 8; ++i) {
+        seed32[i] = curand(&localState);
     }
 
     sha512_context md;
 
-    // Fix A: Remove #pragma unroll for the main loop
     for (int attempts = 0; attempts < ATTEMPTS_PER_EXECUTION; ++attempts) {
-        // --- SHA512 ---
         md.curlen = 0; md.length = 0;
         md.state[0] = UINT64_C(0x6a09e667f3bcc908);
         md.state[1] = UINT64_C(0xbb67ae8584caa73b);
@@ -435,44 +404,48 @@ __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, Search
         md.state[6] = UINT64_C(0x1f83d9abfb41bd6b);
         md.state[7] = UINT64_C(0x5be0cd19137e2179);
 
-        // seed is 32 bytes
         const unsigned char *in = seed;
         #pragma unroll
         for (size_t i = 0; i < 32; i++) md.buf[i] = in[i];
         md.curlen = 32;
 
-        md.length = 256; // 32 * 8
+        md.length = 256;
         md.buf[32] = 0x80;
-        // Pad with zeros up to 120
         #pragma unroll
         for (int i = 33; i < 120; i++) md.buf[i] = 0;
         STORE64H(md.length, md.buf+120);
 
-        uint64_t S[8], W[80], t0, t1;
+        // Optimization 1: Optimize SHA-512 with Rolling Schedule
+        uint64_t S[8], W[16], t0, t1;
         int i;
         #pragma unroll
         for (i = 0; i < 8; i++) S[i] = md.state[i];
         #pragma unroll
         for (i = 0; i < 16; i++) LOAD64H(W[i], md.buf + (8*i));
-        #pragma unroll
-        for (i = 16; i < 80; i++) W[i] = Gamma1(W[i - 2]) + W[i - 7] + Gamma0(W[i - 15]) + W[i - 16];
 
-        #define RND(a,b,c,d,e,f,g,h,i) \
-        t0 = h + Sigma1(e) + Ch(e, f, g) + K[i] + W[i]; \
+        #define RND(a,b,c,d,e,f,g,h,i,w) \
+        t0 = h + Sigma1(e) + Ch(e, f, g) + K[i] + w; \
         t1 = Sigma0(a) + Maj(a, b, c);\
         d += t0; \
         h  = t0 + t1;
 
         #pragma unroll
         for (i = 0; i < 80; i += 8) {
-            RND(S[0],S[1],S[2],S[3],S[4],S[5],S[6],S[7],i+0);
-            RND(S[7],S[0],S[1],S[2],S[3],S[4],S[5],S[6],i+1);
-            RND(S[6],S[7],S[0],S[1],S[2],S[3],S[4],S[5],i+2);
-            RND(S[5],S[6],S[7],S[0],S[1],S[2],S[3],S[4],i+3);
-            RND(S[4],S[5],S[6],S[7],S[0],S[1],S[2],S[3],i+4);
-            RND(S[3],S[4],S[5],S[6],S[7],S[0],S[1],S[2],i+5);
-            RND(S[2],S[3],S[4],S[5],S[6],S[7],S[0],S[1],i+6);
-            RND(S[1],S[2],S[3],S[4],S[5],S[6],S[7],S[0],i+7);
+            if (i >= 16) {
+                #pragma unroll
+                for(int j=0; j<8; j++) {
+                     int k = i + j;
+                     W[k&15] = Gamma1(W[(k+14)&15]) + W[(k+9)&15] + Gamma0(W[(k+1)&15]) + W[k&15];
+                }
+            }
+            RND(S[0],S[1],S[2],S[3],S[4],S[5],S[6],S[7],i+0, W[(i+0)&15]);
+            RND(S[7],S[0],S[1],S[2],S[3],S[4],S[5],S[6],i+1, W[(i+1)&15]);
+            RND(S[6],S[7],S[0],S[1],S[2],S[3],S[4],S[5],i+2, W[(i+2)&15]);
+            RND(S[5],S[6],S[7],S[0],S[1],S[2],S[3],S[4],i+3, W[(i+3)&15]);
+            RND(S[4],S[5],S[6],S[7],S[0],S[1],S[2],S[3],i+4, W[(i+4)&15]);
+            RND(S[3],S[4],S[5],S[6],S[7],S[0],S[1],S[2],i+5, W[(i+5)&15]);
+            RND(S[2],S[3],S[4],S[5],S[6],S[7],S[0],S[1],i+6, W[(i+6)&15]);
+            RND(S[1],S[2],S[3],S[4],S[5],S[6],S[7],S[0],i+7, W[(i+7)&15]);
         }
         #undef RND
 
@@ -489,41 +462,40 @@ __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, Search
         ge_p3_tobytes(publick, &A);
 
         const uint64_t* pub64 = reinterpret_cast<const uint64_t*>(publick);
-        // range.min64 and range.max64 are already aligned uint64_t[4] in the struct
 
-        // 1. Fast Fail
-        // Swap bytes to ensure Big-endian lexicographical comparison on Little-endian GPU
-        uint64_t p0 = bswap64(pub64[0]);
-        // d_range values are already swapped on host
+        // Optimization 2: Hoist bswap64
+        uint64_t p_swapped[4];
+        #pragma unroll
+        for(int k=0; k<4; k++) p_swapped[k] = bswap64(pub64[k]);
+
+        // Fast Fail
+        uint64_t p0 = p_swapped[0];
 
         if (p0 < d_range.min64[0] || p0 > d_range.max64[0]) {
             goto increment_seed;
         }
 
         {
-            // 2. Full Lexicographical Compare
-            // Check >= Min
+            // Full Lexicographical Compare using hoisted values
             int ge_min = 1;
             #pragma unroll
             for (int i = 0; i < 4; i++) {
-                uint64_t p = bswap64(pub64[i]);
+                uint64_t p = p_swapped[i];
                 if (p > d_range.min64[i]) break;
                 if (p < d_range.min64[i]) { ge_min = 0; break; }
             }
             if (!ge_min) goto increment_seed;
 
-            // Check <= Max
             int le_max = 1;
             #pragma unroll
             for (int i = 0; i < 4; i++) {
-                uint64_t p = bswap64(pub64[i]);
+                uint64_t p = p_swapped[i];
                 if (p < d_range.max64[i]) break;
                 if (p > d_range.max64[i]) { le_max = 0; break; }
             }
             if (!le_max) goto increment_seed;
         }
 
-        // Found a match!
         if (atomicCAS(&result->found, 0, 1) == 0) {
             #pragma unroll
             for(int k=0; k<32; k++) result->pubkey[k] = publick[k];
@@ -532,13 +504,11 @@ __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, Search
         }
 
 increment_seed:
-        // --- Vectorized Seed Increment ---
         uint64_t* seed64 = (uint64_t*)seed;
         #pragma unroll
         for(int k=0; k<4; k++) {
             seed64[k]++;
-            if (seed64[k] != 0) break; // No overflow, done.
-            // If overflow (wrapped to 0), continue to next word (carry).
+            if (seed64[k] != 0) break;
         }
     }
 
