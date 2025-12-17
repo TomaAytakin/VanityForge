@@ -23,7 +23,7 @@
 
 #define MAX_ITERATIONS 2000000000
 #define STOP_AFTER_KEYS_FOUND 1
-#define ATTEMPTS_PER_EXECUTION 512
+#define ATTEMPTS_PER_EXECUTION 16384
 
 // Structure to report results from Device to Host
 struct SearchResult {
@@ -137,19 +137,23 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
         for(size_t i=len; i<target_len; i++) min_s[i] = '1';
         min_s[target_len] = 0;
 
-        strcpy(max_s, prefix);
-        for(size_t i=len; i<target_len; i++) max_s[i] = 'z';
-        max_s[target_len] = 0;
-
+        // Attempt decode Min
         int err1 = b58dec_host(target_min, 32, min_s);
         if (err1 == 0) {
+            // Success decoding min. Now try max.
+            strcpy(max_s, prefix);
+            for(size_t i=len; i<target_len; i++) max_s[i] = 'z';
+            max_s[target_len] = 0;
+
             int err2 = b58dec_host(target_max, 32, max_s);
             if (err2 != 0) {
+                // If max overflows, cap at max uint256
                 memset(target_max, 0xFF, 32);
             }
             success = true;
             break;
         }
+        // If err1 != 0 (e.g. overflow), loop continues to try next length (43)
     }
 
     if (!success) {
@@ -162,7 +166,7 @@ void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t ta
 void vanity_setup(config& vanity, int gpu_index);
 void vanity_run(config& vanity, int gpu_index, Range range, const char* prefix_str, const char* suffix_str);
 __global__ void vanity_init(unsigned long long int* seed, curandState* state);
-__global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, SearchResult* result, int* execution_count);
+__global__ __launch_bounds__(256, 2) void vanity_scan(curandState* state, SearchResult* result, int* execution_count);
 
 int main(int argc, char const* argv[]) {
     cudaDeviceProp prop;
@@ -374,7 +378,7 @@ __global__ void vanity_init(unsigned long long int* rseed, curandState* state) {
     curand_init(*rseed + id, id, 0, &state[id]);
 }
 
-__global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, SearchResult* result, int* execution_count) {
+__global__ __launch_bounds__(256, 2) void vanity_scan(curandState* state, SearchResult* result, int* execution_count) {
     int id = threadIdx.x + (blockIdx.x * blockDim.x);
 
     ge_p3 A;
@@ -391,37 +395,35 @@ __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, Search
         seed32[i] = curand(&localState);
     }
 
-    sha512_context md;
+    const uint64_t IV[8] = {
+        UINT64_C(0x6a09e667f3bcc908), UINT64_C(0xbb67ae8584caa73b),
+        UINT64_C(0x3c6ef372fe94f82b), UINT64_C(0xa54ff53a5f1d36f1),
+        UINT64_C(0x510e527fade682d1), UINT64_C(0x9b05688c2b3e6c1f),
+        UINT64_C(0x1f83d9abfb41bd6b), UINT64_C(0x5be0cd19137e2179)
+    };
 
     for (int attempts = 0; attempts < ATTEMPTS_PER_EXECUTION; ++attempts) {
-        md.curlen = 0; md.length = 0;
-        md.state[0] = UINT64_C(0x6a09e667f3bcc908);
-        md.state[1] = UINT64_C(0xbb67ae8584caa73b);
-        md.state[2] = UINT64_C(0x3c6ef372fe94f82b);
-        md.state[3] = UINT64_C(0xa54ff53a5f1d36f1);
-        md.state[4] = UINT64_C(0x510e527fade682d1);
-        md.state[5] = UINT64_C(0x9b05688c2b3e6c1f);
-        md.state[6] = UINT64_C(0x1f83d9abfb41bd6b);
-        md.state[7] = UINT64_C(0x5be0cd19137e2179);
+        // Periodic check to exit early if key found by another thread
+        if ((attempts & 127) == 0) {
+             if (result->found) break;
+        }
 
-        const unsigned char *in = seed;
-        #pragma unroll
-        for (size_t i = 0; i < 32; i++) md.buf[i] = in[i];
-        md.curlen = 32;
-
-        md.length = 256;
-        md.buf[32] = 0x80;
-        #pragma unroll
-        for (int i = 33; i < 120; i++) md.buf[i] = 0;
-        STORE64H(md.length, md.buf+120);
-
-        // Optimization 1: Optimize SHA-512 with Rolling Schedule
+        // Optimization 1: Rolling SHA-512 without sha512_context
         uint64_t S[8], W[16], t0, t1;
-        int i;
+
+        // Init S from IV
         #pragma unroll
-        for (i = 0; i < 8; i++) S[i] = md.state[i];
+        for(int i=0; i<8; i++) S[i] = IV[i];
+
+        // Init W from seed
         #pragma unroll
-        for (i = 0; i < 16; i++) LOAD64H(W[i], md.buf + (8*i));
+        for(int i=0; i<4; i++) {
+             LOAD64H(W[i], seed + 8*i);
+        }
+        W[4] = UINT64_C(0x8000000000000000);
+        #pragma unroll
+        for(int i=5; i<15; i++) W[i] = 0;
+        W[15] = 256; // Length = 256 bits
 
         #define RND(a,b,c,d,e,f,g,h,i,w) \
         t0 = h + Sigma1(e) + Ch(e, f, g) + K[i] + w; \
@@ -429,8 +431,9 @@ __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, Search
         d += t0; \
         h  = t0 + t1;
 
-        #pragma unroll
-        for (i = 0; i < 80; i += 8) {
+        // SHA Loop - 80 rounds
+        // NO UNROLL on the outer loop to reduce code size
+        for (int i = 0; i < 80; i += 8) {
             if (i >= 16) {
                 #pragma unroll
                 for(int j=0; j<8; j++) {
@@ -449,10 +452,12 @@ __global__ __launch_bounds__(256, 1) void vanity_scan(curandState* state, Search
         }
         #undef RND
 
+        // Finalize: Add IV and Store to privatek
         #pragma unroll
-        for (i = 0; i < 8; i++) md.state[i] = md.state[i] + S[i];
-        #pragma unroll
-        for (i = 0; i < 8; i++) STORE64H(md.state[i], privatek+(8*i));
+        for (int i = 0; i < 8; i++) {
+            uint64_t h = S[i] + IV[i];
+            STORE64H(h, privatek + 8*i);
+        }
 
         privatek[0]  &= 248;
         privatek[31] &= 63;
