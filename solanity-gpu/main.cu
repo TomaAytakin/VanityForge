@@ -123,39 +123,47 @@ int b58dec_host(uint8_t *bin, size_t binsz, const char *b58) {
 }
 
 void compute_prefix_range(const char* prefix, uint8_t target_min[32], uint8_t target_max[32]) {
-    // 32-byte keys typically map to 44 Base58 characters.
-    // If the prefix + padding is a valid 32-byte number, we use it.
     char min_s[64];
     char max_s[64];
     size_t len = strlen(prefix);
-    size_t target_len = 44; // Standard length for Solana keys
 
-    if (len > target_len) target_len = len;
+    // Default to 44, but prepare to fallback
+    size_t target_lens[] = {44, 43};
+    bool success = false;
 
-    // Construct Min String: Prefix + '1's
-    strcpy(min_s, prefix);
-    for(size_t i=len; i<target_len; i++) min_s[i] = '1';
-    min_s[target_len] = 0;
+    for (int k = 0; k < 2; k++) {
+        size_t target_len = target_lens[k];
+        if (len > target_len) continue;
 
-    // Construct Max String: Prefix + 'z's
-    strcpy(max_s, prefix);
-    for(size_t i=len; i<target_len; i++) max_s[i] = 'z';
-    max_s[target_len] = 0;
+        // Construct Min String: Prefix + '1's
+        strcpy(min_s, prefix);
+        for(size_t i=len; i<target_len; i++) min_s[i] = '1';
+        min_s[target_len] = 0;
 
-    // Decode
-    int err1 = b58dec_host(target_min, 32, min_s);
-    if (err1 != 0) {
-        // If min overflows 32 bytes, the prefix implies keys > 2^256-1
-        // Set range to impossible (min > max)
-        memset(target_min, 0xFF, 32);
-        memset(target_max, 0x00, 32);
-        return;
+        // Construct Max String: Prefix + 'z's
+        strcpy(max_s, prefix);
+        for(size_t i=len; i<target_len; i++) max_s[i] = 'z';
+        max_s[target_len] = 0;
+
+        // Try Decode Min
+        int err1 = b58dec_host(target_min, 32, min_s);
+        if (err1 == 0) {
+            // Min is valid! Now decode Max.
+            int err2 = b58dec_host(target_max, 32, max_s);
+            if (err2 != 0) {
+                // If max overflows, cap at 0xFF...FF
+                memset(target_max, 0xFF, 32);
+            }
+            success = true;
+            break; // Found a valid range length
+        }
     }
 
-    int err2 = b58dec_host(target_max, 32, max_s);
-    if (err2 != 0) {
-        // If max overflows, cap at 0xFF...FF
-        memset(target_max, 0xFF, 32);
+    if (!success) {
+        // Both 44 and 43 failed (or prefix was too long)
+        // Set to impossible range to trigger error in main
+        memset(target_min, 0xFF, 32);
+        memset(target_max, 0x00, 32);
     }
 }
 
