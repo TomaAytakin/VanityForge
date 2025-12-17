@@ -99,14 +99,13 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
 
     prefix_val, mask_val = calculate_prefix_range(prefix)
 
-    if prefix_val != 0:
-        cmd.extend(["--prefix-val", hex(prefix_val)])
-        cmd.extend(["--mask-val", hex(mask_val)])
-        logging.info(f"GPU Filter: Prefix={hex(prefix_val)} Mask={hex(mask_val)}")
-    else:
-        logging.warning("GPU Filter: Passing 0 mask (Pass All). CPU will be overloaded!")
-        cmd.extend(["--prefix-val", "0"])
-        cmd.extend(["--mask-val", "0"])
+    if mask_val == 0:
+        logging.error("GPU Filter: Mask is 0 (Pass All). This is not allowed on GPU architecture. Please provide a more specific prefix.")
+        return None, None
+
+    cmd.extend(["--prefix-val", hex(prefix_val)])
+    cmd.extend(["--mask-val", hex(mask_val)])
+    logging.info(f"GPU Filter: Prefix={hex(prefix_val)} Mask={hex(mask_val)}")
 
     if suffix:
         cmd.extend(["--suffix", suffix])
