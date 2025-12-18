@@ -4,3 +4,4 @@ server.log
 gpu-worker/target/
 verification_env/
 node_modules/
+redpanda-cpu/target/
