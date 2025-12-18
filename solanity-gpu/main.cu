@@ -24,6 +24,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <random>
 
 // Include ECC headers
 #include "fixedint.h"
@@ -94,8 +95,8 @@ void phase1_filter_kernel(
     ge_p3_0(&P);
 
     // Calculate Start Index with Randomized Offset
-    // Formula: start_index = random_offset + (tid * BATCH_SIZE)
-    uint64_t start_index = random_offset + ((uint64_t)tid * BATCH_SIZE);
+    // Formula: start_index = random_offset + tid
+    uint64_t start_index = random_offset + (uint64_t)tid;
 
     // Construct scalar for initialization
     unsigned char init_scalar[32];
@@ -244,11 +245,11 @@ void compute_prefix_target(const char* prefix_str, uint64_t* out_val, uint64_t* 
 void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check) {
     // 1. Reconstruct Scalar
     // Old: scalar = tid + (iter_count * stride)
-    // New: scalar = random_offset + (tid * BATCH_SIZE) + (iter_count * total_threads)
+    // New: scalar = random_offset + tid + (iter_count * total_threads)
 
     // Use __int128 to prevent overflow before conversion to 32-byte array
     unsigned __int128 offset = (unsigned __int128)random_offset +
-                               ((unsigned __int128)thread_id * BATCH_SIZE) +
+                               ((unsigned __int128)thread_id) +
                                ((unsigned __int128)iter_count * total_threads);
 
     unsigned char scalar[32];
@@ -336,16 +337,10 @@ int main(int argc, char** argv) {
     int gridSize = prop.multiProcessorCount * 128; // Many blocks to hide latency
 
     // Generate Randomized Offset
-    uint64_t random_offset = 0;
-    int fd = open("/dev/urandom", O_RDONLY);
-    if (fd > 0) {
-        read(fd, &random_offset, sizeof(random_offset));
-        close(fd);
-    } else {
-        // Fallback: Use time (less secure but functional)
-        random_offset = (uint64_t)time(NULL);
-        fprintf(stderr, "[Warn] /dev/urandom failed, using time fallback.\n");
-    }
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<uint64_t> dis;
+    uint64_t random_offset = dis(gen);
 
     printf("VanityForge Iterator (L4 Optimized)\n");
     printf("GPU: %s\n", prop.name);
