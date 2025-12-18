@@ -1,223 +1,130 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, scrolledtext, messagebox
 import subprocess
 import threading
 import sys
 import os
 import platform
 import json
-import time
-import requests
-import zipfile
-import io
-import shutil
-
-# Configuration
-# Replace with your actual GitHub User and Repo
-GITHUB_REPO_URL = "https://api.github.com/repos/YourUser/VanityForge/releases/latest"
-BIN_DIR = "bin"
-GPU_MINER_NAME = "solanity-gpu.exe" if platform.system() == "Windows" else "solanity-gpu"
-CPU_MINER_NAME = "solanity-cpu.exe" if platform.system() == "Windows" else "solanity-cpu"
+import queue
 
 class VanityForgeApp:
     def __init__(self, root):
         self.root = root
         self.root.title("VanityForge Studio")
-        self.root.geometry("800x600")
-        self.root.configure(bg="#1e1e1e")
+        self.root.geometry("600x700")
 
-        # Styling
-        self.style = ttk.Style()
-        self.style.theme_use("clam")
+        # Style
+        style = ttk.Style()
+        style.theme_use('clam')
 
-        # Dark Theme Colors
-        self.colors = {
-            "bg": "#1e1e1e",
-            "fg": "#ffffff",
-            "accent": "#007acc",
-            "success": "#4caf50",
-            "warning": "#ff9800",
-            "panel": "#2d2d2d",
-            "text_box": "#111111"
-        }
+        # Variables
+        self.prefix_var = tk.StringVar()
+        self.suffix_var = tk.StringVar()
+        self.case_sensitive_var = tk.BooleanVar()
+        self.mode_var = tk.StringVar(value="CPU") # Default to CPU
+        self.is_running = False
+        self.process = None
+        self.log_queue = queue.Queue()
 
-        self.style.configure(".", background=self.colors["bg"], foreground=self.colors["fg"], fieldbackground=self.colors["text_box"])
-        self.style.configure("TLabel", background=self.colors["bg"], foreground=self.colors["fg"], font=("Segoe UI", 10))
-        self.style.configure("Header.TLabel", font=("Segoe UI", 16, "bold"))
-        self.style.configure("TButton", padding=6, relief="flat", background=self.colors["panel"])
-        self.style.map("TButton", background=[("active", self.colors["accent"])])
-        self.style.configure("TFrame", background=self.colors["bg"])
-        self.style.configure("Panel.TFrame", background=self.colors["panel"])
+        # UI Layout
+        self.create_widgets()
 
-        # State
-        self.miner_process = None
-        self.is_mining = False
-        self.miner_thread = None
-        self.miner_mode = tk.StringVar(value="GPU")
+        # Periodic check for logs
+        self.root.after(100, self.process_logs)
 
-        # UI Components
-        self.create_header()
-        self.create_hardware_info()
-        self.create_controls()
-        self.create_dashboard()
-        self.create_key_display()
-        self.create_footer()
+        # Safety: Ensure process is killed on close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Initialize
-        self.detect_hardware()
+    def create_widgets(self):
+        # Header
+        header = ttk.Label(self.root, text="VanityForge Studio", font=("Helvetica", 16, "bold"))
+        header.pack(pady=10)
 
-    def create_header(self):
-        header_frame = ttk.Frame(self.root, padding="20 20 20 0")
-        header_frame.pack(fill=tk.X)
+        # Inputs Frame
+        input_frame = ttk.LabelFrame(self.root, text="Settings", padding="10")
+        input_frame.pack(fill="x", padx=10, pady=5)
 
-        title_label = ttk.Label(header_frame, text="VanityForge Studio", style="Header.TLabel")
-        title_label.pack(side=tk.LEFT)
+        # Prefix
+        ttk.Label(input_frame, text="Prefix (Starts with):").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(input_frame, textvariable=self.prefix_var).grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
-        update_btn = ttk.Button(header_frame, text="Check for Updates", command=self.check_for_updates)
-        update_btn.pack(side=tk.RIGHT)
+        # Suffix
+        ttk.Label(input_frame, text="Suffix (Ends with):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(input_frame, textvariable=self.suffix_var).grid(row=1, column=1, sticky="ew", padx=5, pady=2)
 
-    def create_hardware_info(self):
-        info_frame = ttk.Frame(self.root, padding="20 10")
-        info_frame.pack(fill=tk.X)
+        # Case Sensitive
+        ttk.Checkbutton(input_frame, text="Case Sensitive", variable=self.case_sensitive_var).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=5)
 
-        self.cpu_label = ttk.Label(info_frame, text="CPU: Detecting...", foreground="#aaaaaa")
-        self.cpu_label.pack(anchor=tk.W)
+        input_frame.columnconfigure(1, weight=1)
 
-        self.gpu_label = ttk.Label(info_frame, text="GPU: Detecting...", foreground="#aaaaaa")
-        self.gpu_label.pack(anchor=tk.W)
+        # Mode Frame
+        mode_frame = ttk.LabelFrame(self.root, text="Mode", padding="10")
+        mode_frame.pack(fill="x", padx=10, pady=5)
 
-    def create_controls(self):
-        control_frame = ttk.Frame(self.root, padding="20 10")
-        control_frame.pack(fill=tk.X)
+        ttk.Radiobutton(mode_frame, text="CPU (RedPanda)", variable=self.mode_var, value="CPU").pack(anchor="w", padx=5)
+        ttk.Radiobutton(mode_frame, text="GPU (Solanity)", variable=self.mode_var, value="GPU").pack(anchor="w", padx=5)
 
-        # Mode Switch
-        mode_frame = ttk.LabelFrame(control_frame, text="Mining Mode", padding="10")
-        mode_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
+        # Controls Frame
+        control_frame = ttk.Frame(self.root, padding="10")
+        control_frame.pack(fill="x", padx=10, pady=5)
 
-        ttk.Radiobutton(mode_frame, text="GPU Miner (C++)", variable=self.miner_mode, value="GPU", command=self.on_mode_change).pack(anchor=tk.W)
-        ttk.Radiobutton(mode_frame, text="CPU Miner (Rust)", variable=self.miner_mode, value="CPU", command=self.on_mode_change).pack(anchor=tk.W)
+        self.start_btn = ttk.Button(control_frame, text="Start Forge", command=self.start_mining)
+        self.start_btn.pack(side="left", fill="x", expand=True, padx=5)
 
-        # Start/Stop Buttons
-        action_frame = ttk.Frame(control_frame)
-        action_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self.stop_btn = ttk.Button(control_frame, text="Stop", command=self.stop_mining, state="disabled")
+        self.stop_btn.pack(side="right", fill="x", expand=True, padx=5)
 
-        self.start_btn = tk.Button(action_frame, text="START MINING", bg=self.colors["success"], fg="white",
-                                   font=("Segoe UI", 12, "bold"), relief="flat", padx=20, pady=10,
-                                   command=self.start_mining)
-        self.start_btn.pack(side=tk.LEFT, padx=(0, 10))
+        # Logs Frame
+        log_frame = ttk.LabelFrame(self.root, text="Logs", padding="10")
+        log_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.stop_btn = tk.Button(action_frame, text="STOP", bg=self.colors["warning"], fg="white",
-                                  font=("Segoe UI", 12, "bold"), relief="flat", padx=20, pady=10,
-                                  command=self.stop_mining, state=tk.DISABLED)
-        self.stop_btn.pack(side=tk.LEFT)
-
-    def create_dashboard(self):
-        dash_frame = ttk.Frame(self.root, padding="20 10")
-        dash_frame.pack(fill=tk.X)
-
-        # Speed Meter
-        self.speed_label = ttk.Label(dash_frame, text="0 MH/s", font=("Segoe UI", 24, "bold"), foreground=self.colors["accent"])
-        self.speed_label.pack()
-
-        ttk.Label(dash_frame, text="Current Speed").pack()
-
-        # Log/Status
-        self.status_label = ttk.Label(dash_frame, text="Ready", foreground="#888888")
-        self.status_label.pack(pady=(10, 0))
-
-    def create_key_display(self):
-        key_frame = ttk.LabelFrame(self.root, text="Found Wallet", padding="20")
-        key_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        # Private Key
-        ttk.Label(key_frame, text="Private Key:").pack(anchor=tk.W)
-        self.priv_key_entry = tk.Entry(key_frame, bg=self.colors["text_box"], fg=self.colors["success"],
-                                       font=("Consolas", 10), relief="flat", insertbackground="white")
-        self.priv_key_entry.pack(fill=tk.X, pady=(0, 10))
-
-        # Public Key
-        ttk.Label(key_frame, text="Public Key:").pack(anchor=tk.W)
-        self.pub_key_entry = tk.Entry(key_frame, bg=self.colors["text_box"], fg=self.colors["accent"],
-                                      font=("Consolas", 10), relief="flat", insertbackground="white")
-        self.pub_key_entry.pack(fill=tk.X)
-
-    def create_footer(self):
-        footer_frame = ttk.Frame(self.root, padding="10")
-        footer_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        ttk.Label(footer_frame, text="Powered by Solanity Engine", font=("Segoe UI", 8)).pack(side=tk.RIGHT)
-
-    def detect_hardware(self):
-        cpu_name = "Unknown"
-        gpu_name = "Unknown"
-
-        if platform.system() == "Windows":
-            try:
-                cpu_cmd = 'wmic cpu get name'
-                cpu_out = subprocess.check_output(cpu_cmd, shell=True).decode().split('\n')[1].strip()
-                if cpu_out: cpu_name = cpu_out
-
-                gpu_cmd = 'wmic path win32_videocontroller get name'
-                gpu_out = subprocess.check_output(gpu_cmd, shell=True).decode().split('\n')[1].strip()
-                if gpu_out: gpu_name = gpu_out
-            except Exception as e:
-                print(f"Error detecting hardware: {e}")
-        else:
-            # Linux Fallback
-            try:
-                # Try to get CPU info on Linux
-                with open("/proc/cpuinfo", "r") as f:
-                    for line in f:
-                        if "model name" in line:
-                            cpu_name = line.split(":")[1].strip()
-                            break
-                # Simple GPU check via lspci
-                try:
-                    gpu_out = subprocess.check_output("lspci | grep -i vga", shell=True).decode()
-                    if ":" in gpu_out:
-                        gpu_name = gpu_out.split(":")[2].strip()
-                    else:
-                        gpu_name = "Linux GPU"
-                except:
-                    gpu_name = "Linux GPU (Generic)"
-            except:
-                pass
-
-        self.cpu_label.config(text=f"CPU: {cpu_name}")
-        self.gpu_label.config(text=f"GPU: {gpu_name}")
-
-    def on_mode_change(self):
-        if self.is_mining:
-            messagebox.showinfo("Mining Active", "Please stop mining before switching modes.")
-            # Revert selection
-            current = self.miner_mode.get()
-            self.miner_mode.set("CPU" if current == "GPU" else "GPU")
+        self.log_area = scrolledtext.ScrolledText(log_frame, state="disabled", height=15)
+        self.log_area.pack(fill="both", expand=True)
 
     def start_mining(self):
-        if self.is_mining: return
+        if self.is_running:
+            return
 
-        miner_bin = GPU_MINER_NAME if self.miner_mode.get() == "GPU" else CPU_MINER_NAME
-        miner_path = os.path.join(BIN_DIR, miner_bin)
+        prefix = self.prefix_var.get().strip()
+        suffix = self.suffix_var.get().strip()
+        case_sensitive = self.case_sensitive_var.get()
+        mode = self.mode_var.get()
 
-        if not os.path.exists(miner_path):
-            # Fallback to check if binary is in current dir
-            if os.path.exists(miner_bin):
-                miner_path = miner_bin
-            else:
-                messagebox.showerror("Error", f"Miner executable not found: {miner_path}\nPlease run updates or build the project.")
-                return
+        # Determine Executable
+        if mode == "CPU":
+            binary_name = "redpanda-cpu"
+        else:
+            binary_name = "solanity-gpu"
+
+        if platform.system() == "Windows":
+            binary_name += ".exe"
+
+        # Check if binary exists (optional, but good practice)
+        if not os.path.exists(binary_name) and not any(os.access(os.path.join(path, binary_name), os.X_OK) for path in os.environ["PATH"].split(os.pathsep)):
+            # We will still try to run it, but log a warning if not found in cwd
+            self.log_message(f"Warning: {binary_name} not found in current directory. Attempting to run from PATH...")
+
+        # Construct Command
+        cmd = [binary_name]
+        if prefix:
+            cmd.extend(["--prefix", prefix])
+        if suffix:
+            cmd.extend(["--suffix", suffix])
+        if case_sensitive:
+            cmd.append("--case-sensitive")
+
+        self.log_message(f"Starting {mode} Forge...")
+        self.log_message(f"Command: {' '.join(cmd)}")
 
         try:
-            # Prepare arguments
-            # Note: Add logic to pass parameters to the miner (e.g., prefix)
-            args = [miner_path]
-
-            # Create subprocess
+            # On Windows, creationflags=subprocess.CREATE_NO_WINDOW hides the console window
             creation_flags = 0
             if platform.system() == "Windows":
                 creation_flags = subprocess.CREATE_NO_WINDOW
 
-            self.miner_process = subprocess.Popen(
-                args,
+            self.process = subprocess.Popen(
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -226,137 +133,97 @@ class VanityForgeApp:
                 creationflags=creation_flags
             )
 
-            self.is_mining = True
-            self.start_btn.config(state=tk.DISABLED, bg=self.colors["panel"])
-            self.stop_btn.config(state=tk.NORMAL, bg=self.colors["warning"])
-            self.status_label.config(text="Mining started...")
+            self.is_running = True
+            self.start_btn.config(state="disabled")
+            self.stop_btn.config(state="normal")
 
             # Start monitoring thread
-            self.miner_thread = threading.Thread(target=self.monitor_miner, daemon=True)
-            self.miner_thread.start()
+            threading.Thread(target=self.monitor_output, daemon=True).start()
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to start miner: {e}")
+            self.log_message(f"Error starting process: {e}")
+            messagebox.showerror("Error", f"Failed to start miner:\n{e}")
 
     def stop_mining(self):
-        if not self.is_mining or not self.miner_process:
-            return
-
-        self.status_label.config(text="Stopping...")
-
-        # Kill process
-        try:
-            self.miner_process.terminate()
-            self.miner_process = None
-        except:
-            pass
-
-        self.is_mining = False
-        self.start_btn.config(state=tk.NORMAL, bg=self.colors["success"])
-        self.stop_btn.config(state=tk.DISABLED, bg=self.colors["panel"])
-        self.status_label.config(text="Stopped")
-        self.speed_label.config(text="0 MH/s")
-
-    def monitor_miner(self, process=None):
-        while self.is_mining and self.miner_process:
+        if self.process and self.is_running:
+            self.log_message("Stopping...")
             try:
-                line = self.miner_process.stdout.readline()
-                if not line:
+                self.process.terminate()
+            except Exception as e:
+                self.log_message(f"Error stopping process: {e}")
+
+            self.process = None
+            self.is_running = False
+            self.start_btn.config(state="normal")
+            self.stop_btn.config(state="disabled")
+            self.log_message("Stopped.")
+
+    def monitor_output(self):
+        while self.is_running and self.process:
+            try:
+                line = self.process.stdout.readline()
+                if not line and self.process.poll() is not None:
                     break
 
-                line = line.strip()
-                if not line: continue
+                if line:
+                    self.log_queue.put({"type": "log", "content": line.strip()})
 
-                # Speed Parsing Logic
-                if "MH/s" in line:
-                    try:
-                        parts = line.split()
-                        for i, part in enumerate(parts):
-                            if "MH/s" in part:
-                                speed = parts[i-1]
-                                self.root.after(0, lambda s=speed: self.speed_label.config(text=f"{s} MH/s"))
-                    except:
-                        pass
-
-                # JSON Success Logic
-                if "{" in line and "}" in line and "private_key" in line:
-                    try:
-                        start = line.find('{')
-                        end = line.rfind('}') + 1
-                        json_str = line[start:end]
-                        data = json.loads(json_str)
-
-                        if "private_key" in data and "public_key" in data:
-                            self.root.after(0, lambda d=data: self.display_success(d))
-                    except:
-                        pass
-            except Exception:
+                    # Success Detection
+                    if '"public_key"' in line and '"secret_key"' in line:
+                         try:
+                             # Extract JSON part if mixed with text
+                             start_idx = line.find('{')
+                             end_idx = line.rfind('}') + 1
+                             if start_idx != -1 and end_idx != -1:
+                                 json_str = line[start_idx:end_idx]
+                                 data = json.loads(json_str)
+                                 self.log_queue.put({"type": "success", "data": data})
+                         except json.JSONDecodeError:
+                             pass # Not valid JSON, ignore
+            except Exception as e:
+                self.log_queue.put({"type": "log", "content": f"Error reading output: {e}"})
                 break
 
-        if self.is_mining:
-            self.root.after(0, self.stop_mining)
+        if self.is_running:
+             # Process exited unexpectedly or finished
+             self.log_queue.put({"type": "finished"})
 
-    def display_success(self, data):
-        self.priv_key_entry.delete(0, tk.END)
-        self.priv_key_entry.insert(0, data["private_key"])
-
-        self.pub_key_entry.delete(0, tk.END)
-        self.pub_key_entry.insert(0, data["public_key"])
-
-        self.status_label.config(text="KEY FOUND!", foreground=self.colors["success"])
-        messagebox.showinfo("Success", "Vanity Address Found!")
-        self.stop_mining()
-
-    def check_for_updates(self):
-        self.status_label.config(text="Checking for updates...")
-        threading.Thread(target=self._perform_update, daemon=True).start()
-
-    def _perform_update(self):
+    def process_logs(self):
         try:
-            # 1. Fetch latest release info
-            try:
-                response = requests.get(GITHUB_REPO_URL)
-                response.raise_for_status()
-                data = response.json()
-            except Exception as e:
-                # If placeholder URL fails, we show message but don't crash
-                self.root.after(0, lambda: messagebox.showinfo("Update Check", "Could not connect to update server.\n(Configure GITHUB_REPO_URL in source)"))
-                self.root.after(0, lambda: self.status_label.config(text="Update check failed."))
-                return
+            while True:
+                item = self.log_queue.get_nowait()
 
-            assets = data.get("assets", [])
-            downloaded = 0
+                if item["type"] == "log":
+                    self.log_message(item["content"])
 
-            if not os.path.exists(BIN_DIR):
-                os.makedirs(BIN_DIR)
+                elif item["type"] == "success":
+                    data = item["data"]
+                    self.log_message(f"SUCCESS! Wallet Found: {data.get('public_key')}")
+                    self.stop_mining()
+                    messagebox.showinfo("Wallet Found!", f"Public Key: {data.get('public_key')}\n\nCheck logs for details.")
 
-            for asset in assets:
-                name = asset["name"]
-                if name in [GPU_MINER_NAME, CPU_MINER_NAME]:
-                    download_url = asset["browser_download_url"]
-                    self.root.after(0, lambda n=name: self.status_label.config(text=f"Downloading {n}..."))
+                elif item["type"] == "finished":
+                     if self.is_running:
+                         self.stop_mining()
+                         self.log_message("Process finished.")
 
-                    # Download
-                    r = requests.get(download_url)
-                    with open(os.path.join(BIN_DIR, name), "wb") as f:
-                        f.write(r.content)
-                    downloaded += 1
+        except queue.Empty:
+            pass
 
-            if downloaded > 0:
-                self.root.after(0, lambda: messagebox.showinfo("Update Complete", f"Successfully updated {downloaded} components.\nMiners are ready."))
-                self.root.after(0, lambda: self.status_label.config(text="Update complete."))
-            else:
-                self.root.after(0, lambda: messagebox.showinfo("No Updates", "No matching binaries found in the latest release."))
-                self.root.after(0, lambda: self.status_label.config(text="Up to date."))
+        self.root.after(100, self.process_logs)
 
-        except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Update Error", str(e)))
-            self.root.after(0, lambda: self.status_label.config(text="Error."))
+    def log_message(self, msg):
+        self.log_area.config(state="normal")
+        self.log_area.insert(tk.END, msg + "\n")
+        self.log_area.see(tk.END)
+        self.log_area.config(state="disabled")
+
+    def on_close(self):
+        if self.is_running:
+            self.stop_mining()
+        self.root.destroy()
 
 if __name__ == "__main__":
-    if not os.path.exists(BIN_DIR):
-        os.makedirs(BIN_DIR)
-
     root = tk.Tk()
     app = VanityForgeApp(root)
     root.mainloop()
