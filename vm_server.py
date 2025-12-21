@@ -14,6 +14,8 @@ import math
 import requests
 import smtplib
 import ssl
+import json
+import subprocess
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify, render_template
@@ -141,21 +143,6 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin, wor
             cleanup_firestore_client(db)
 
 # --- LOCAL CPU LOGIC ---
-def check_key_batch(prefix, suffix, case_sensitive, batch_size):
-    prefix_str = prefix or ""
-    suffix_str = suffix or ""
-    for i in range(batch_size):
-        kp = Keypair()
-        pub = str(kp.pubkey())
-        p_match = pub.startswith(prefix_str) if case_sensitive else pub.lower().startswith(prefix_str.lower())
-        s_match = pub.endswith(suffix_str) if case_sensitive else pub.lower().endswith(suffix_str.lower())
-        if (not prefix or p_match) and (not suffix or s_match):
-            return (str(kp.pubkey()), base58.b58encode(bytes(kp)).decode('ascii'), i + 1)
-    return (None, None, batch_size)
-
-def worker_batch_wrapper(args):
-    return check_key_batch(*args)
-
 def check_user_trials(user_id):
     db = None
     try:
@@ -316,59 +303,62 @@ def send_completion_email(to_email, public_key, private_key_enc=None):
     send_email_wrapper(to_email, "Forge Complete! Your Wallet is Ready 🚀", get_sola_html(success_html))
 
 def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, email=None, notify=False):
-    # DEDICATE TOTAL_GRINDING_CORES to this single worker
-    pool_size = TOTAL_GRINDING_CORES
     db = None
+    process = None
     try:
         db = firestore.Client(project=PROJECT_ID)
-        checkpoint_ref = db.collection('job_checkpoints').document(job_id)
-        doc = checkpoint_ref.get()
-        total_attempts = doc.to_dict().get('last_attempt_number', 0) if doc.exists else 0
-        last_save = total_attempts
         
-        # NOTE: Status is already set to 'RUNNING' by the scheduler before calling this
-        BATCH_SIZE = 50000
+        cmd = ["./redpanda-cpu"]
+        if prefix:
+            cmd.extend(["--prefix", prefix])
+        if suffix:
+            cmd.extend(["--suffix", suffix])
+        if case_sensitive:
+            cmd.append("--case-sensitive")
 
-        with multiprocessing.Pool(processes=pool_size) as pool:
-            pending = [pool.apply_async(worker_batch_wrapper, args=((prefix, suffix, case_sensitive, BATCH_SIZE),)) for _ in range(pool_size * 2)]
-            found_key = None
-            
-            while not found_key:
-                next_pending = []
-                processed = 0
-                for res in pending:
-                    if res.ready():
-                        processed += 1
-                        try:
-                            pub, raw, count = res.get()
-                            total_attempts += count
-                            if pub: 
-                                found_key = (pub, raw)
-                                break
-                        except: pass
-                    else:
-                        next_pending.append(res)
-                
-                if found_key: break
-                for _ in range(processed): next_pending.append(pool.apply_async(worker_batch_wrapper, args=((prefix, suffix, case_sensitive, BATCH_SIZE),)))
-                pending = next_pending
-                
-                if total_attempts - last_save >= 10000000:
-                    checkpoint_ref.set({'last_attempt_number': total_attempts})
-                    last_save = total_attempts
-                time.sleep(0.05)
-            
-            pool.terminate()
-            pool.join()
-            
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+
+        found_key = None
+
+        for line in process.stdout:
+            line = line.strip()
+            if "public_key" in line:
+                try:
+                    data = json.loads(line)
+                    if "public_key" in data and "secret_key" in data:
+                        found_key = (data["public_key"], data["secret_key"])
+                        break
+                except json.JSONDecodeError:
+                    logging.warning(f"Failed to parse JSON from redpanda-cpu: {line}")
+
+        # Ensure process cleanup
+        process.terminate()
+        process.wait()
+
+        if found_key:
             key = generate_key_from_pin(pin, user_id)
             enc_key = Fernet(key).encrypt(found_key[1].encode()).decode()
             
             db.collection('vanity_jobs').document(job_id).update({
                 'status': 'COMPLETED', 'public_key': found_key[0], 'secret_key': enc_key, 'completed_at': firestore.SERVER_TIMESTAMP
             })
-            if notify and email: send_completion_email(email, found_key[0])
-            checkpoint_ref.delete()
+            if notify and email:
+                send_completion_email(email, found_key[0])
+
+            # Cleanup checkpoint if exists
+            try:
+                db.collection('job_checkpoints').document(job_id).delete()
+            except: pass
+        else:
+             # Process exited without result
+             stderr = process.stderr.read()
+             raise Exception(f"Process exited without result. Stderr: {stderr}")
 
     except Exception as e:
         logging.exception("Background grinder failed")
@@ -376,6 +366,11 @@ def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, ema
             try: db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': str(e)})
             except: pass
     finally:
+        if process:
+            try:
+                process.terminate()
+                process.wait()
+            except: pass
         cleanup_firestore_client(db)
 
 # --- QUEUE SCHEDULER (THE TRAFFIC CONTROLLER) ---
