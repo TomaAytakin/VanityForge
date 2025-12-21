@@ -1,7 +1,6 @@
 import os
 import uuid
 import logging
-import multiprocessing
 import threading
 import base58
 import re
@@ -14,8 +13,6 @@ import math
 import requests
 import smtplib
 import ssl
-import json
-import subprocess
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, request, jsonify, render_template
@@ -36,11 +33,6 @@ load_dotenv()
 # --- LOGGING CONFIGURATION ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- DYNAMIC CORE ALLOCATION ---
-# Calculate cores for grinding, reserving 1 for the API/System
-TOTAL_CORES = multiprocessing.cpu_count()
-TOTAL_GRINDING_CORES = max(1, TOTAL_CORES - 1) 
-
 # 2. CONFIGURATION
 PROJECT_ID = os.getenv('PROJECT_ID', 'vanityforge').strip()
 SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL', '').strip()
@@ -54,8 +46,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT"))
 ADMIN_EMAILS = {"tomaaytakin@gmail.com", "Jonny95hidalgo@gmail.com", "admin@vanityforge.org"}
 
 # --- QUEUE LIMITS (TRAFFIC CONTROL) ---
-MAX_LOCAL_JOBS = 1    # Max concurrent "Easy" jobs (Uses TOTAL_GRINDING_CORES)
-MAX_CLOUD_JOBS = 50  # Max concurrent "Hard" jobs on Cloud Run
+MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
 REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', f"projects/{PROJECT_ID}/locations/us-central1/jobs/vanity-gpu-redpanda")
@@ -302,77 +293,6 @@ def send_completion_email(to_email, public_key, private_key_enc=None):
     """
     send_email_wrapper(to_email, "Forge Complete! Your Wallet is Ready 🚀", get_sola_html(success_html))
 
-def background_grinder(job_id, user_id, prefix, suffix, case_sensitive, pin, email=None, notify=False):
-    db = None
-    process = None
-    try:
-        db = firestore.Client(project=PROJECT_ID)
-        
-        cmd = ["./redpanda-cpu"]
-        if prefix:
-            cmd.extend(["--prefix", prefix])
-        if suffix:
-            cmd.extend(["--suffix", suffix])
-        if case_sensitive:
-            cmd.append("--case-sensitive")
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
-
-        found_key = None
-
-        for line in process.stdout:
-            line = line.strip()
-            if "public_key" in line:
-                try:
-                    data = json.loads(line)
-                    if "public_key" in data and "secret_key" in data:
-                        found_key = (data["public_key"], data["secret_key"])
-                        break
-                except json.JSONDecodeError:
-                    logging.warning(f"Failed to parse JSON from redpanda-cpu: {line}")
-
-        # Ensure process cleanup
-        process.terminate()
-        process.wait()
-
-        if found_key:
-            key = generate_key_from_pin(pin, user_id)
-            enc_key = Fernet(key).encrypt(found_key[1].encode()).decode()
-            
-            db.collection('vanity_jobs').document(job_id).update({
-                'status': 'COMPLETED', 'public_key': found_key[0], 'secret_key': enc_key, 'completed_at': firestore.SERVER_TIMESTAMP
-            })
-            if notify and email:
-                send_completion_email(email, found_key[0])
-
-            # Cleanup checkpoint if exists
-            try:
-                db.collection('job_checkpoints').document(job_id).delete()
-            except: pass
-        else:
-             # Process exited without result
-             stderr = process.stderr.read()
-             raise Exception(f"Process exited without result. Stderr: {stderr}")
-
-    except Exception as e:
-        logging.exception("Background grinder failed")
-        if db:
-            try: db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': str(e)})
-            except: pass
-    finally:
-        if process:
-            try:
-                process.terminate()
-                process.wait()
-            except: pass
-        cleanup_firestore_client(db)
-
 # --- QUEUE SCHEDULER (THE TRAFFIC CONTROLLER) ---
 def scheduler_loop():
     """Background thread that checks for open slots and starts queued jobs."""
@@ -382,11 +302,9 @@ def scheduler_loop():
         try:
             # 1. Count CURRENTLY running jobs
             running_cloud = 0
-            running_local = 0
             running_docs = db.collection('vanity_jobs').where('status', '==', 'RUNNING').stream()
             for d in running_docs:
-                if d.to_dict().get('is_cloud', False): running_cloud += 1
-                else: running_local += 1
+                running_cloud += 1
             
             # 2. Fetch QUEUED jobs (Oldest first = Fairness)
             # THIS QUERY REQUIRES THE COMPOSITE INDEX: status=QUEUED, order_by=created_at
@@ -396,7 +314,6 @@ def scheduler_loop():
                 try:
                     data = doc.to_dict()
                     job_id = data.get('job_id')
-                    is_cloud = data.get('is_cloud', False)
 
                     # Retrieve the temporary PIN needed for encryption
                     pin_plain = data.get('temp_pin')
@@ -407,59 +324,32 @@ def scheduler_loop():
                         continue
 
                     # --- DISPATCH LOGIC ---
-                    if is_cloud:
-                        # RULE: Cloud jobs (Paid/Hard) -> Cloud Run Queue
-                        if running_cloud < MAX_CLOUD_JOBS:
-                            logging.info(f"🚦 Dispatching Cloud Job: {job_id}")
-                            db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
+                    # RULE: ALL jobs now go to Cloud Run
+                    if running_cloud < MAX_CLOUD_JOBS:
+                        logging.info(f"🚦 Dispatching Cloud Job: {job_id}")
+                        db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
 
-                            if data.get('notify') and data.get('email'):
-                                try:
-                                    send_start_email(data['email'], job_id, data.get('prefix'), data.get('suffix'), data.get('price_sol'), data.get('is_trial'))
-                                except Exception as e:
-                                    logging.error(f"Failed to send start email: {e}")
-
-                            # Cleanup temp PIN for security BEFORE dispatching
-                            db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
-
-                            # Trigger Cloud Run (AFTER security cleanup)
-                            dispatch_cloud_job(
-                                job_id, 
-                                data.get('user_id'), 
-                                data.get('prefix'), 
-                                data.get('suffix'), 
-                                data.get('case_sensitive', True), 
-                                pin_plain,
-                                data.get('worker_type', 'cloud-run-cpu') # Default to CPU if missing
-                            )
-
-                            running_cloud += 1
-
-                    else:
-                        # RULE: Local jobs (Free/Easy) -> VM Queue
-                        if running_local < MAX_LOCAL_JOBS:
-                            logging.info(f"🚦 Starting Local Job: {job_id}")
-                            # Update status FIRST to reserve slot
-                            db.collection('vanity_jobs').document(job_id).update({'status': 'RUNNING'})
-
-                            if data.get('notify') and data.get('email'):
-                                try:
-                                    send_start_email(data['email'], job_id, data.get('prefix'), data.get('suffix'), data.get('price_sol'), data.get('is_trial'))
-                                except Exception as e:
-                                    logging.error(f"Failed to send start email: {e}")
-
-                            # Start Local Process (NOTE: pin_plain is passed securely to the worker)
+                        if data.get('notify') and data.get('email'):
                             try:
-                                p = multiprocessing.Process(target=background_grinder, args=(job_id, data.get('user_id'), data.get('prefix'), data.get('suffix'), data.get('case_sensitive', True), pin_plain, data.get('email'), data.get('notify')))
-                                p.start()
-                                running_local += 1
-                            except Exception as pe:
-                                logging.exception(f"❌ Failed to start process for {job_id}")
-                                db.collection('vanity_jobs').document(job_id).update({'status': 'FAILED', 'error': f"Process Start Failed: {pe}"})
-                                continue
+                                send_start_email(data['email'], job_id, data.get('prefix'), data.get('suffix'), data.get('price_sol'), data.get('is_trial'))
+                            except Exception as e:
+                                logging.error(f"Failed to send start email: {e}")
 
-                            # Cleanup temp PIN
-                            db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
+                        # Cleanup temp PIN for security BEFORE dispatching
+                        db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
+
+                        # Trigger Cloud Run (AFTER security cleanup)
+                        dispatch_cloud_job(
+                            job_id,
+                            data.get('user_id'),
+                            data.get('prefix'),
+                            data.get('suffix'),
+                            data.get('case_sensitive', True),
+                            pin_plain,
+                            data.get('worker_type', 'cloud-run-cpu') # Default to CPU if missing
+                        )
+
+                        running_cloud += 1
 
                 except Exception as e:
                     logging.exception(f"❌ Error processing job {doc.id}")
@@ -578,15 +468,12 @@ def submit_job():
         
         # --- JOB QUEUE LOGIC ---
         # Determine Worker Type & Cloud Status
-        if use_gpu:
+        if use_gpu or total_len >= 6:
             worker_type = "cloud-run-gpu-redpanda"
-            is_cloud_job = True
-        elif total_len >= 5:
-            worker_type = "cloud-run-cpu"
-            is_cloud_job = True
         else:
-            worker_type = "local-cpu"
-            is_cloud_job = False
+            worker_type = "cloud-run-cpu"
+
+        is_cloud_job = True
 
         # 2. Save Initial State as 'QUEUED'
         db.collection('vanity_jobs').document(job_id).set({
