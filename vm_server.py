@@ -10,6 +10,8 @@ import base64
 import bcrypt
 import hashlib
 import math
+import random
+import string
 import requests
 import smtplib
 import ssl
@@ -82,6 +84,11 @@ def vvvip():
 
 @app.route('/faq')
 def faq(): return app.send_static_file('faq.html')
+
+# --- REFERRAL SYSTEM HELPERS ---
+def generate_referral_code():
+    """Generates a unique 4-character alphanumeric code."""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
 
 def cleanup_firestore_client(db):
     """Safely closes the Firestore client connection."""
@@ -374,7 +381,12 @@ def check_user():
     try:
         db = firestore.Client(project=PROJECT_ID)
         doc = db.collection('users').document(user_id).get()
-        return jsonify({'has_pin': bool(doc.exists and doc.to_dict().get('pin_hash')), 'trials_used': check_user_trials(user_id)})
+        user_data = doc.to_dict() if doc.exists else {}
+        return jsonify({
+            'has_pin': bool(user_data.get('pin_hash')),
+            'trials_used': check_user_trials(user_id),
+            'referred_by': user_data.get('referred_by')
+        })
     except Exception as e: return jsonify({'error': str(e)}), 500
     finally:
         cleanup_firestore_client(db)
@@ -393,6 +405,140 @@ def set_pin():
     finally:
         cleanup_firestore_client(db)
 
+# --- REFERRAL ENDPOINTS ---
+@app.route('/api/referral/create', methods=['POST'])
+def create_referral():
+    data = request.get_json(silent=True) or {}
+    user_id, pin = data.get('user_id'), data.get('pin')
+    if not user_id or not pin: return jsonify({'error': 'Missing ID or PIN'}), 400
+
+    db = None
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+
+        # Verify PIN
+        udoc = db.collection('users').document(user_id).get()
+        if not udoc.exists or not udoc.to_dict().get('pin_hash'): return jsonify({'error': 'PIN not set'}), 400
+        user_data = udoc.to_dict()
+        if not bcrypt.checkpw(pin.encode(), user_data.get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
+
+        # Check if already has code
+        ref_doc = db.collection('referrals').document(user_id).get()
+        if ref_doc.exists:
+            return jsonify(ref_doc.to_dict())
+
+        # Generate Unique Code
+        code = generate_referral_code()
+        # Ensure uniqueness (simple check, retry loop could be better but collision prob is low for now)
+        # In a high volume system, we'd check 'referrals' collection where code == new_code
+
+        new_ref = {
+            'user_id': user_id,
+            'code': code,
+            'balance_sol': 0.0,
+            'total_earnings': 0.0,
+            'usage_count': 0,
+            'created_at': firestore.SERVER_TIMESTAMP
+        }
+        db.collection('referrals').document(user_id).set(new_ref)
+        return jsonify(new_ref)
+    except Exception as e:
+        logging.exception("Referral Create Error")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cleanup_firestore_client(db)
+
+@app.route('/api/referral/stats', methods=['GET'])
+def referral_stats():
+    user_id = request.args.get('user_id')
+    if not user_id: return jsonify({'error': 'Missing user_id'}), 400
+
+    db = None
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        doc = db.collection('referrals').document(user_id).get()
+        if not doc.exists: return jsonify({'error': 'No referral account'}), 404
+        return jsonify(doc.to_dict())
+    except Exception as e: return jsonify({'error': str(e)}), 500
+    finally:
+        cleanup_firestore_client(db)
+
+@app.route('/api/referral/validate', methods=['POST'])
+def validate_referral():
+    data = request.get_json(silent=True) or {}
+    code = data.get('code', '').strip().upper()
+    if not code: return jsonify({'valid': False}), 200
+
+    db = None
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        # Query for code
+        docs = db.collection('referrals').where('code', '==', code).limit(1).stream()
+        valid = any(docs)
+        return jsonify({'valid': valid, 'discount_percent': 10 if valid else 0})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+    finally:
+        cleanup_firestore_client(db)
+
+@app.route('/api/referral/withdraw', methods=['POST'])
+def withdraw_referral():
+    data = request.get_json(silent=True) or {}
+    user_id, pin = data.get('user_id'), data.get('pin')
+    amount = float(data.get('amount', 0))
+    target_wallet = data.get('target_wallet')
+
+    if amount < 0.1: return jsonify({'error': 'Min withdrawal 0.1 SOL'}), 400
+    if not is_base58(target_wallet): return jsonify({'error': 'Invalid Wallet'}), 400
+
+    db = None
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+
+        # Verify PIN
+        udoc = db.collection('users').document(user_id).get()
+        if not udoc.exists or not bcrypt.checkpw(pin.encode(), udoc.to_dict().get('pin_hash').encode()):
+            return jsonify({'error': 'Invalid PIN'}), 401
+
+        ref_ref = db.collection('referrals').document(user_id)
+
+        # Transactional update
+        @firestore.transactional
+        def update_balance(transaction, ref_ref):
+            snapshot = transaction.get(ref_ref)
+            if not snapshot.exists: raise Exception("No referral account")
+            balance = snapshot.get('balance_sol')
+            if balance < amount: raise Exception("Insufficient balance")
+
+            transaction.update(ref_ref, {'balance_sol': balance - amount})
+            return balance - amount
+
+        transaction = db.transaction()
+        new_balance = update_balance(transaction, ref_ref)
+
+        # Create Withdrawal Request
+        db.collection('withdrawal_requests').add({
+            'user_id': user_id,
+            'amount': amount,
+            'target_wallet': target_wallet,
+            'status': 'PENDING',
+            'created_at': firestore.SERVER_TIMESTAMP
+        })
+
+        # Notify Admin
+        send_email_wrapper(
+            ADMIN_EMAILS.copy().pop(), # Just send to one admin
+            f"[Ref Liquidation Request] User: {user_id}",
+            f"User {user_id} requested {amount} SOL to {target_wallet}. New Balance: {new_balance}"
+        )
+
+        return jsonify({'message': 'Withdrawal requested', 'new_balance': new_balance})
+
+    except Exception as e:
+        logging.exception("Withdrawal Error")
+        return jsonify({'error': str(e)}), 400
+    finally:
+        cleanup_firestore_client(db)
+
 @app.route('/submit-job', methods=['POST'])
 @limiter.limit("60 per minute")
 def submit_job():
@@ -402,6 +548,7 @@ def submit_job():
     pin, tx_sig = data.get('pin'), data.get('transaction_signature')
     email, notify = data.get('email'), data.get('notify', False)
     use_gpu = data.get('use_gpu', False)
+    referral_code = data.get('referral_code', '').strip().upper()
     
     if not user_id or not pin: return jsonify({'error': 'Missing ID or PIN'}), 400
     if not prefix and not suffix: return jsonify({'error': 'Prefix/Suffix required'}), 400
@@ -420,6 +567,23 @@ def submit_job():
         # --- ADMIN / GOD MODE DETECTION ---
         is_admin = email in ADMIN_EMAILS
         is_god_mode = user_data.get('god_mode', False) or is_admin
+
+        # --- REFERRAL LOGIC: LIFETIME BINDING ---
+        active_referral_code = None
+        # 1. Check Lifetime Binding
+        if user_data.get('referred_by'):
+            active_referral_code = user_data.get('referred_by')
+        # 2. If not bound, check provided code
+        elif referral_code:
+            # Validate code
+            ref_docs = list(db.collection('referrals').where('code', '==', referral_code).limit(1).stream())
+            if ref_docs:
+                referrer_doc = ref_docs[0]
+                # Prevent self-referral
+                if referrer_doc.id != user_id:
+                     # Bind User
+                     db.collection('users').document(user_id).update({'referred_by': referral_code})
+                     active_referral_code = referral_code
 
         # --- ACTIVE JOB CHECK ---
         # Admins (God Mode) bypass the active job check to run parallel jobs
@@ -460,6 +624,9 @@ def submit_job():
             price = 0.0
         else:
             price = base * 0.5
+            # Apply Referral Discount (Extra 10%)
+            if active_referral_code:
+                price = price * 0.90
         
         # Hard Limit
         if total_len > 8: return jsonify({'error': 'Max 8 chars allowed in Beta'}), 403
@@ -498,7 +665,36 @@ def submit_job():
             'email': email, 
             'notify': notify
         })
-        
+
+        # --- PROCESS COMMISSION (Async/Optimistic) ---
+        if active_referral_code and price > 0:
+            try:
+                # Find referrer (we did this earlier if binding, but safe to query again or cache)
+                # If we bound it, we know it exists. If it was already bound, we need to find the doc id.
+                # Optimization: Query by code
+                ref_docs = list(db.collection('referrals').where('code', '==', active_referral_code).limit(1).stream())
+                if ref_docs:
+                    referrer_ref = ref_docs[0].reference
+                    commission = price * 0.15
+
+                    # Transactional increment
+                    @firestore.transactional
+                    def add_commission(transaction, ref):
+                        snap = transaction.get(ref)
+                        if snap.exists:
+                            transaction.update(ref, {
+                                'balance_sol': snap.get('balance_sol') + commission,
+                                'total_earnings': snap.get('total_earnings') + commission,
+                                'usage_count': snap.get('usage_count') + 1
+                            })
+
+                    transaction = db.transaction()
+                    add_commission(transaction, referrer_ref)
+                    logging.info(f"💰 Commission {commission} SOL credited to {referrer_ref.id} for job {job_id}")
+
+            except Exception as e:
+                logging.error(f"Failed to credit commission: {e}")
+
         return jsonify({'job_id': job_id, 'message': 'Job Queued successfully'}), 202
 
     except Exception as e:

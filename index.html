@@ -42,7 +42,8 @@
                     </div>
                     <div class="hidden md:block">
                         <div class="ml-10 flex items-baseline space-x-4">
-                            <a href="/" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
+                            <a href="#" onclick="showSection('forge'); return false;" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors" id="nav-forge">Forge</a>
+                            <a href="#" onclick="openReferralDashboard(); return false;" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors" id="nav-referrals">Referrals</a>
                             <a href="/vvvip" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">VVVIP Addresses</a>
                             <a href="/roadmap" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
                             <a href="/faq" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
@@ -62,7 +63,8 @@
 
         <div class="hidden md:hidden" id="mobile-menu">
             <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-                <a href="/" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">Forge</a>
+                <a href="#" onclick="showSection('forge'); return false;" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">Forge</a>
+                <a href="#" onclick="openReferralDashboard(); return false;" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Referrals</a>
                 <a href="/vvvip" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">VVVIP Addresses</a>
                 <a href="/roadmap" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
                 <a href="/faq" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
@@ -90,6 +92,66 @@
 
     <div id="app-interface" class="w-full max-w-2xl hidden space-y-6 animate-fade-in-up">
 
+        <!-- REFERRAL DASHBOARD SECTION -->
+        <div id="referral-dashboard" class="glass-panel p-8 rounded-xl shadow-lg hidden">
+            <h2 class="text-xl font-bold mb-6 text-purple-400 flex items-center gap-2 border-b border-gray-700 pb-2">
+                <i class="fa-solid fa-users"></i> Referral Program
+            </h2>
+
+            <div id="referral-loading" class="text-center py-8 text-gray-400">
+                <i class="fa-solid fa-spinner fa-spin text-2xl"></i><br>Loading Stats...
+            </div>
+
+            <!-- STATE 1: CREATE CODE -->
+            <div id="referral-create" class="hidden text-center py-4">
+                <i class="fa-solid fa-gift text-4xl text-purple-500 mb-4"></i>
+                <h3 class="text-lg font-bold text-white mb-2">Earn 15% Commission Forever</h3>
+                <p class="text-gray-400 text-sm mb-6 max-w-sm mx-auto">
+                    Create your unique referral code. When users pay with your code, they get a <span class="text-green-400">10% Discount</span> and are
+                    <span class="text-purple-400 font-bold">Lifetime Bound</span> to you. You earn 15% on every job they ever submit.
+                </p>
+                <button onclick="openNumpad('create_referral', 'Enter PIN to Generate Code', createReferralCode)" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition transform hover:scale-105">
+                    Generate My Code
+                </button>
+            </div>
+
+            <!-- STATE 2: STATS & WITHDRAW -->
+            <div id="referral-stats" class="hidden">
+                <div class="bg-gray-800/50 rounded-lg p-4 mb-6 border border-gray-700 flex justify-between items-center">
+                    <div>
+                        <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Your Code</span>
+                        <div class="text-2xl font-mono font-bold text-white tracking-widest cursor-pointer hover:text-purple-400 transition" onclick="copyToClipboard(this.innerText)" id="my-ref-code">----</div>
+                    </div>
+                    <div class="text-right">
+                         <span class="text-xs text-gray-500 uppercase font-bold tracking-wider">Usage</span>
+                         <div class="text-xl font-bold text-white" id="ref-usage">0</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="bg-gray-800/50 p-4 rounded-lg border border-gray-700 text-center">
+                        <span class="text-xs text-gray-500 uppercase block mb-1">Total Earnings</span>
+                        <span class="text-xl font-bold text-green-400" id="ref-total">0.00 SOL</span>
+                    </div>
+                    <div class="bg-gray-800/50 p-4 rounded-lg border border-gray-700 text-center">
+                         <span class="text-xs text-gray-500 uppercase block mb-1">Available Balance</span>
+                         <span class="text-xl font-bold text-purple-400" id="ref-balance">0.00 SOL</span>
+                    </div>
+                </div>
+
+                <h3 class="text-sm font-bold text-gray-300 mb-3 border-t border-gray-700 pt-4">Request Withdrawal</h3>
+                <div class="space-y-3">
+                    <input type="number" id="withdraw-amount" class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm" placeholder="Amount (Min 0.1 SOL)">
+                    <input type="text" id="withdraw-wallet" class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm font-mono" placeholder="Target Wallet Address">
+                    <button onclick="initiateWithdrawal()" class="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded transition border border-gray-600">
+                        Request Payout
+                    </button>
+                    <p class="text-[10px] text-gray-500 text-center">Withdrawals are processed manually within 24 hours.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="forge-section">
         <div class="glass-panel p-8 rounded-xl shadow-lg relative overflow-hidden">
             <div class="absolute top-0 right-0 p-4 opacity-10">
                 <i class="fa-solid fa-code text-6xl text-purple-500"></i>
@@ -107,6 +169,18 @@
                     <label class="block text-sm text-gray-400 mb-1">Suffix (Ends with)</label>
                     <input type="text" id="suffix" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. 888">
                 </div>
+            </div>
+
+            <!-- Referral Code Input -->
+            <div class="mb-4">
+                 <label class="block text-sm text-gray-400 mb-1">Referral Code (Optional)</label>
+                 <div class="flex gap-2">
+                     <input type="text" id="referral-code-input" maxlength="4" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600 uppercase" placeholder="CODE">
+                     <button onclick="checkReferralCode()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 rounded border border-gray-600 transition" type="button">
+                         Check
+                     </button>
+                 </div>
+                 <p id="referral-status-msg" class="text-xs mt-1 hidden"></p>
             </div>
 
             <p class="text-xs text-gray-500 mb-4">Note: Characters 0, O, I, and l are not allowed by Solana for security reasons.</p>
@@ -164,6 +238,7 @@
                 <i class="fa-solid fa-rocket"></i> Forge
             </button>
             <p id="submit-error" class="text-red-400 text-sm mt-3 text-center hidden bg-red-900/20 py-2 rounded border border-red-900/50"></p>
+        </div> <!-- End of forge-section -->
 
         <!-- Job Queue Section -->
         <div id="job-queue-section" class="glass-panel p-8 rounded-xl shadow-lg hidden">
@@ -282,6 +357,7 @@
         var currentUserEmail = null;
         var jobListenerUnsubscribe = null;
         var userTrialsUsed = 0;
+        var referralDiscountActive = false;
 
         // AUDIO SYSTEM
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -394,6 +470,154 @@
             }
         }
 
+        // --- REFERRAL SYSTEM LOGIC ---
+        function showSection(section) {
+            const forgeSec = document.getElementById('forge-section');
+            const refSec = document.getElementById('referral-dashboard');
+            const navForge = document.getElementById('nav-forge');
+            const navRef = document.getElementById('nav-referrals');
+
+            // Reset classes
+            navForge.className = navForge.className.replace('bg-gray-900 text-white', 'text-gray-300 hover:text-white hover:bg-gray-700');
+            navRef.className = navRef.className.replace('bg-gray-900 text-white', 'text-gray-300 hover:text-white hover:bg-gray-700');
+
+            if (section === 'forge') {
+                forgeSec.classList.remove('hidden');
+                refSec.classList.add('hidden');
+                navForge.classList.add('bg-gray-900', 'text-white');
+                navForge.classList.remove('text-gray-300', 'hover:text-white', 'hover:bg-gray-700');
+            } else {
+                forgeSec.classList.add('hidden');
+                refSec.classList.remove('hidden');
+                navRef.classList.add('bg-gray-900', 'text-white');
+                navRef.classList.remove('text-gray-300', 'hover:text-white', 'hover:bg-gray-700');
+            }
+        }
+
+        async function openReferralDashboard() {
+            showSection('referrals');
+            if (!currentUser) return; // Should allow guest? No, needs ID.
+
+            const loading = document.getElementById('referral-loading');
+            const createDiv = document.getElementById('referral-create');
+            const statsDiv = document.getElementById('referral-stats');
+
+            loading.classList.remove('hidden');
+            createDiv.classList.add('hidden');
+            statsDiv.classList.add('hidden');
+
+            try {
+                const res = await fetch(`/api/referral/stats?user_id=${currentUser}`);
+                if (res.status === 404) {
+                    loading.classList.add('hidden');
+                    createDiv.classList.remove('hidden');
+                } else if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('my-ref-code').innerText = data.code;
+                    document.getElementById('ref-usage').innerText = data.usage_count;
+                    document.getElementById('ref-total').innerText = data.total_earnings.toFixed(3) + ' SOL';
+                    document.getElementById('ref-balance').innerText = data.balance_sol.toFixed(3) + ' SOL';
+
+                    loading.classList.add('hidden');
+                    statsDiv.classList.remove('hidden');
+                } else {
+                    alert("Error loading stats");
+                }
+            } catch (e) {
+                console.error(e);
+                loading.innerText = "Error";
+            }
+        }
+
+        async function createReferralCode(pin) {
+            try {
+                const res = await fetch('/api/referral/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: currentUser, pin: pin })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert("Code Created! " + data.code);
+                    openReferralDashboard(); // Refresh
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Creation failed.");
+            }
+        }
+
+        async function initiateWithdrawal() {
+             const amount = parseFloat(document.getElementById('withdraw-amount').value);
+             const wallet = document.getElementById('withdraw-wallet').value;
+             if (!amount || amount < 0.1) {
+                 alert("Minimum withdrawal is 0.1 SOL");
+                 return;
+             }
+             if (!wallet) {
+                 alert("Please enter a wallet address");
+                 return;
+             }
+             openNumpad('withdraw_referral', 'Enter PIN to Withdraw', submitWithdrawal);
+        }
+
+        async function submitWithdrawal(pin) {
+             const amount = document.getElementById('withdraw-amount').value;
+             const wallet = document.getElementById('withdraw-wallet').value;
+             try {
+                const res = await fetch('/api/referral/withdraw', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        user_id: currentUser,
+                        pin: pin,
+                        amount: amount,
+                        target_wallet: wallet
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert("Withdrawal Requested! Admin will process it shortly.");
+                    openReferralDashboard(); // Refresh
+                    document.getElementById('withdraw-amount').value = '';
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Withdrawal failed.");
+            }
+        }
+
+        async function checkReferralCode() {
+            const code = document.getElementById('referral-code-input').value.toUpperCase();
+            const msg = document.getElementById('referral-status-msg');
+            if (!code) return;
+
+            try {
+                const res = await fetch('/api/referral/validate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ code: code })
+                });
+                const data = await res.json();
+                if (data.valid) {
+                    referralDiscountActive = true;
+                    msg.innerText = "Code Applied! 10% Discount Active.";
+                    msg.className = "text-xs mt-1 text-green-400 font-bold";
+                    msg.classList.remove('hidden');
+                } else {
+                    referralDiscountActive = false;
+                    msg.innerText = "Invalid Code.";
+                    msg.className = "text-xs mt-1 text-red-400";
+                    msg.classList.remove('hidden');
+                }
+                updateEstimates();
+            } catch(e) { console.error(e); }
+        }
+
         function numpadClear() {
             if (currentPin.length > 0) {
                 currentPin = currentPin.slice(0, -1);
@@ -425,6 +649,10 @@
                 numpadCallback(currentPin);
             } else if (numpadMode === 'reveal') {
                 numpadCallback(revealJobId, currentPin);
+            } else if (numpadMode === 'create_referral') {
+                numpadCallback(currentPin);
+            } else if (numpadMode === 'withdraw_referral') {
+                numpadCallback(currentPin);
             }
 
             closeNumpad();
@@ -501,6 +729,21 @@
                 });
                 const data = await res.json();
                 userTrialsUsed = data.trials_used || 0;
+
+                // Lifetime Binding Check
+                if (data.referred_by) {
+                    const refInput = document.getElementById('referral-code-input');
+                    refInput.value = data.referred_by;
+                    refInput.disabled = true;
+
+                    const msg = document.getElementById('referral-status-msg');
+                    msg.innerText = "Lifetime Discount Active (Bound to " + data.referred_by + ")";
+                    msg.className = "text-xs mt-1 text-purple-400 font-bold";
+                    msg.classList.remove('hidden');
+
+                    referralDiscountActive = true;
+                }
+
                 if (data.has_pin) {
                     onLoginSuccess();
                 } else {
@@ -642,6 +885,11 @@
 
             // Apply 50% Discount (on the final price)
             let finalPrice = basePrice * 0.5;
+
+            // Apply Referral Discount (Extra 10%)
+            if (referralDiscountActive) {
+                finalPrice = finalPrice * 0.90;
+            }
 
             // Check Trial (Only if NOT using GPU, or maybe trial allows GPU? Assuming trial is basic only usually, but let's assume trial covers cost)
             // If user selects GPU, maybe trial doesn't apply? User requirement: "50% Beta Discount Applied".
@@ -860,7 +1108,8 @@
                 transaction_signature: transactionSignature,
                 email: currentUserEmail,
                 notify: notify,
-                use_gpu: useGpu
+                use_gpu: useGpu,
+                referral_code: document.getElementById('referral-code-input').value
             };
             try {
                 const res = await fetch('/submit-job', {
