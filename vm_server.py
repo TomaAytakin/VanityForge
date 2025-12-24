@@ -422,7 +422,7 @@ def create_referral():
         user_data = udoc.to_dict()
         if not bcrypt.checkpw(pin.encode(), user_data.get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
 
-        # Check if already has code
+        # Check if already has code (Idempotency Check)
         ref_doc = db.collection('referrals').document(user_id).get()
         if ref_doc.exists:
             return jsonify(ref_doc.to_dict())
