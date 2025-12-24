@@ -15,7 +15,7 @@ WORKDIR /app
 COPY . /app
 
 # Build the CUDA application
-RUN make
+RUN make -B
 
 # Install Python requirements
 RUN pip3 install -r requirements.txt

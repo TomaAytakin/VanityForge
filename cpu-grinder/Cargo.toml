@@ -1,0 +1,10 @@
+[package]
+name = "cpu-grinder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solana-sdk = "1.16"
+clap = { version = "4.4", features = ["derive"] }
+rayon = "1.8"
+bs58 = "0.5"
