@@ -6,31 +6,31 @@ This roadmap tracks the development progress of the VanityForge platform, from t
 
 ---
 
-### ✅ COMPLETED
+### ✅ COMPLETED (Q4 2025)
 
 **Launch & Core Infrastructure**
-*   **MVP Launch (Core Grinding Logic):** Successfully deployed the core Python-based vanity address generator utilizing `solders` and `base58` for performance.
-*   **Hybrid Cloud/Local Dispatcher:** Implemented a smart orchestration system in `vm_server.py` that routes short jobs (<5 chars) to local multiprocessing workers and long jobs (5+ chars) to Google Cloud Run containers.
-*   **Email Notification System:** Integrated rich HTML email notifications featuring "Sola" branding to alert users when their long-running jobs are started and completed.
+*   **MVP Launch (Core Grinding Logic):** Successfully deployed the core Python-based vanity address generator.
+*   **Deploy Backend to Google Cloud VM:** Established the orchestration server on Google Compute Engine.
+*   **Integrate Google Cloud Run for Worker Autoscaling:** Successfully implemented serverless dispatch for heavy jobs.
+*   **Develop CUDA GPU Miner (`solanity-gpu`):** Launched high-performance NVIDIA L4/T4 support for paid tiers.
+*   **Email Notification System:** Integrated rich HTML email notifications featuring "Sola" branding.
 
-**Security & Reliability**
-*   **Security Hardening:**
-    *   **Rate Limiting:** Implemented `Flask-Limiter` (60 req/min) to prevent abuse.
-    *   **Anti-Leak Measures:** Sanitized environment variables and database connections.
-    *   **Poison Pill:** Robust process management to prevent zombie processes.
+**Monetization & Security**
+*   **Launch Referral System:** Implemented a robust 30% revenue share model for referrers.
+*   **Implement Payment Verification:** Secure Solana Pay/RPC integration for automated premium job processing.
+*   **Security Hardening:** Rate limiting, anti-leak measures, and rigorous process management.
 
 ---
 
-### 🚧 IN PROGRESS / NEXT
+### 🚧 IN PROGRESS / Q1 2026
 
 **Performance & Engine**
-*   **High-Performance Engine:** Migrating the Cloud Grinder logic from Python to **Rust** with **CUDA** support.
-    *   *Goal:* Achieve 1 GH/s (Billion hashes per second) per node.
-    *   *Impact:* Reduce 7-char generation time from days to minutes.
+*   **Rust CPU Miner (`cpu-grinder`):** developing a high-performance Rust-based miner to upgrade the Free Tier speed.
+*   **Public API for Developers:** Creating a standardized API for third-party integrations.
 
 **User Experience (UX)**
-*   **Immersive UI:** Integrating a 3D avatar of "Jules" to guide users through the process, replacing static forms with an interactive experience.
-*   **Payment Gateway:** Finalizing the integration of Solana payments for Premium (Paid) tiers to support the costs of GPU cloud compute.
+*   **Mobile UI Optimization:** Enhancing the mobile experience for on-the-go forging.
+*   **Immersive UI:** Integrating a 3D avatar of "Jules" to guide users through the process.
 
 ---
 
