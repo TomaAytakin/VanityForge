@@ -43,7 +43,9 @@ os.environ.setdefault("SMTP_SERVER", "smtp.gmail.com")
 os.environ.setdefault("SMTP_PORT", "587")
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT"))
-ADMIN_EMAILS = {"tomaaytakin@gmail.com", "Jonny95hidalgo@gmail.com", "admin@vanityforge.org"}
+
+# --- ADMIN LIST (GOD MODE) ---
+ADMIN_EMAILS = {"tomaaytakin@gmail.com", "admin@vanityforge.org", "Jonny95hidalgo@gmail.com"}
 
 # --- QUEUE LIMITS (TRAFFIC CONTROL) ---
 MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run
@@ -415,13 +417,13 @@ def submit_job():
 
         user_data = udoc.to_dict()
         
-        # --- START ADMIN BYPASS FIX ---
-        is_admin_email = email in ADMIN_EMAILS
-        is_god_mode = user_data.get('god_mode', False) or is_admin_email
-        # --- END ADMIN BYPASS FIX ---
+        # --- ADMIN / GOD MODE DETECTION ---
+        is_admin = email in ADMIN_EMAILS
+        is_god_mode = user_data.get('god_mode', False) or is_admin
 
         # --- ACTIVE JOB CHECK ---
-        if not is_god_mode: # ADMINS NOW BYPASS THIS CHECK
+        # Admins (God Mode) bypass the active job check to run parallel jobs
+        if not is_god_mode:
             active_jobs = db.collection('vanity_jobs') \
                 .where('user_id', '==', user_id) \
                 .where('status', 'in', ['QUEUED', 'RUNNING']) \
@@ -431,8 +433,6 @@ def submit_job():
                 return jsonify({'error': 'You have an active job'}), 400
 
         if not bcrypt.checkpw(pin.encode(), user_data.get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
-        
-        is_admin = (email in ADMIN_EMAILS)
         
         # --- DETERMINE JOB TYPE (CLOUD vs LOCAL) ---
         total_len = len(prefix or '') + len(suffix or '')
@@ -453,8 +453,13 @@ def submit_job():
         if use_gpu:
             base = base * 1.5
         
-        # Free logic: <5 chars AND trials remaining
-        price = 0.0 if (total_len <= 4 and check_user_trials(user_id) < 2) or is_admin else base * 0.5
+        # Free logic: <5 chars AND trials remaining OR Admin/God Mode
+        if is_admin:
+            price = 0.0
+        elif total_len <= 4 and check_user_trials(user_id) < 2:
+            price = 0.0
+        else:
+            price = base * 0.5
         
         # Hard Limit
         if total_len > 8: return jsonify({'error': 'Max 8 chars allowed in Beta'}), 403
