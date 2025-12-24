@@ -13,8 +13,14 @@
     <script src="utils/sns.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 80px; }
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 120px; }
         .glass-panel { background: rgba(40, 40, 40, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+
+        /* Stats Bar Animation */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .gear-spin { animation: spin 12s linear infinite; }
+        .gear-fast { animation-duration: 0.8s !important; }
+
         /* Custom scrollbar for better aesthetics */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1a1a1a; }
@@ -73,6 +79,12 @@
             </div>
         </div>
     </nav>
+
+    <!-- Stats Bar -->
+    <div class="fixed top-16 left-0 w-full bg-gray-900/80 backdrop-blur border-b border-gray-700 py-2 flex justify-center items-center gap-3 text-purple-300 font-mono text-sm tracking-widest uppercase shadow-md z-40">
+        <i id="activity-gear" class="fa-solid fa-gear gear-spin text-purple-500"></i>
+        <span>Vanity Identities Forged: <span id="identity-counter" class="text-white font-bold text-base">...</span></span>
+    </div>
 
     <div class="w-full max-w-2xl mb-8 flex justify-center mt-10">
         <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
@@ -1411,5 +1423,6 @@
         window.numpadSubmit = numpadSubmit;
         window.closeNumpad = closeNumpad;
     </script>
+    <script src="vanity.js"></script>
 </body>
 </html>
