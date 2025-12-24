@@ -6,5 +6,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt google-cloud-firestore fireb
 COPY solanity-gpu/ .
 # Compile the GPU miner
 RUN make
+
+# Generate precomputed tables during build
+RUN ./solanity --generate-tables
+
 # Run the worker
 CMD ["python3", "worker.py"]
