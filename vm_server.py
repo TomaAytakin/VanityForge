@@ -125,8 +125,8 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin, wor
                         {"name": "TASK_PREFIX", "value": prefix or ""},
                         {"name": "TASK_SUFFIX", "value": suffix or ""},
                         {"name": "TASK_CASE", "value": str(case_sensitive)},
-                        {"name": "TASK_PIN", "value": pin},
-                        {"name": "TASK_USER_ID", "value": user_id}
+                        {"name": "TASK_PIN", "value": str(pin)},
+                        {"name": "TASK_USER_ID", "value": str(user_id)}
                     ]
                 }]
             }
