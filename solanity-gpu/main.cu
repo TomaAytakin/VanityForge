@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <random>
+#include <chrono>
 
 // Include ECC headers
 #include "fixedint.h"
@@ -39,7 +40,7 @@
 #define BLOCK_SIZE 256
 // ATTEMPTS_PER_BATCH: How many adds before checking ring buffer / stats?
 // Too small: overhead. Too large: latency. 256 is fine.
-#define ATTEMPTS_PER_BATCH 4096
+#define ATTEMPTS_PER_BATCH 8192
 #define BATCH_SIZE ATTEMPTS_PER_BATCH // Alias for clarity with user instructions
 #define RING_BUFFER_SIZE 1024  // Power of 2
 #define RING_BUFFER_MASK (RING_BUFFER_SIZE - 1)
@@ -363,12 +364,13 @@ int main(int argc, char** argv) {
 
     uint32_t local_read_head = 0;
     unsigned long long last_hashes = 0;
+    auto last_time = std::chrono::high_resolution_clock::now();
 
     // Total threads for reconstruction
     uint32_t total_threads = gridSize * BLOCK_SIZE;
 
     while(1) {
-        usleep(200000);
+        usleep(50000);
 
         uint32_t write_head = h_ring_mapped->write_head;
 
@@ -382,13 +384,16 @@ int main(int argc, char** argv) {
             }
         }
 
-        unsigned long long current = h_stats_mapped->total_hashes;
-        double speed = (double)(current - last_hashes) * 5.0 / 1000000.0;
-        last_hashes = current;
+        auto current_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = current_time - last_time;
 
-        static int ticks = 0;
-        if (ticks++ % 5 == 0) {
+        if (elapsed.count() >= 1.0) {
+            unsigned long long current = h_stats_mapped->total_hashes;
+            double speed = (double)(current - last_hashes) / elapsed.count() / 1000000.0;
             printf("[Status] Speed: %.2f MH/s | Ring Lag: %d\n", speed, write_head - local_read_head);
+
+            last_hashes = current;
+            last_time = current_time;
         }
     }
 
