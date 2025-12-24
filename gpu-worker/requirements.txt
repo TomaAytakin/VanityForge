@@ -1,4 +1,0 @@
-firebase-admin
-google-cloud-firestore
-cryptography
-python-dotenv

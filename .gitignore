@@ -6,3 +6,4 @@ verification_env/
 node_modules/
 .env
 service-account.json
+firebase_credentials
