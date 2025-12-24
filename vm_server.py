@@ -441,7 +441,11 @@ def create_referral():
             'created_at': firestore.SERVER_TIMESTAMP
         }
         db.collection('referrals').document(user_id).set(new_ref)
-        return jsonify(new_ref)
+        return jsonify({
+            "success": True,
+            "code": code,
+            "message": "Referral code created successfully"
+        })
     except Exception as e:
         logging.exception("Referral Create Error")
         return jsonify({'error': str(e)}), 500
