@@ -136,6 +136,8 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
                 final_json_str = line_str
                 found_json = True
                 logging.info(f"⛏️ GRINDER: KEY FOUND!")
+                process.terminate()
+                break
             else:
                 current_time = time.strftime("%H:%M:%S", time.localtime())
                 print(f"[{current_time}] ⛏️ GRINDER: {line_str}", flush=True)
@@ -228,6 +230,8 @@ if __name__ == "__main__":
             if not success:
                 logging.error("ERROR: FIRESTORE_UPDATE_FAILED")
                 sys.exit(1)
+
+            sys.exit(0)
 
         else:
             logging.error("Failed to generate address.")

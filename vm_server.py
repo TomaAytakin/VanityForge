@@ -53,8 +53,8 @@ ADMIN_EMAILS = {"tomaaytakin@gmail.com", "admin@vanityforge.org", "Jonny95hidalg
 MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
-REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', f"projects/{PROJECT_ID}/locations/us-central1/jobs/vanity-gpu-redpanda")
-CPU_JOB_NAME = os.getenv('CPU_JOB_NAME', f"projects/{PROJECT_ID}/locations/europe-west1/jobs/vanity-gpu-worker")
+REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', "projects/vanityforge/locations/us-central1/jobs/vanity-gpu-redpanda")
+CPU_JOB_NAME = os.getenv('CPU_JOB_NAME', "projects/vanityforge/locations/europe-west1/jobs/vanity-gpu-worker")
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -640,10 +640,21 @@ def submit_job():
         
         # --- JOB QUEUE LOGIC ---
         # Determine Worker Type & Cloud Status
-        if use_gpu or total_len >= 6:
-            worker_type = "cloud-run-gpu-redpanda"
-        else:
+        # Default to CPU
+        worker_type = "cloud-run-cpu"
+
+        # Trial Logic (Price 0 and not God Mode)
+        is_trial_job = (price == 0) and not is_god_mode
+
+        if is_trial_job:
+            # Trial users always use CPU
             worker_type = "cloud-run-cpu"
+        else:
+            # Paid users (or God Mode) get GPU if requested or hard
+            if use_gpu or total_len >= 6:
+                worker_type = "cloud-run-gpu-redpanda"
+            else:
+                worker_type = "cloud-run-cpu"
 
         is_cloud_job = True
 
