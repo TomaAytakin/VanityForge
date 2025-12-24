@@ -37,6 +37,16 @@
 // Actually, we need SHA-512 for the Host (Phase 2) to potentially re-verify or seed init.
 #include "sha512.cu"
 
+// --- Macros ---
+
+#define CHECK_CUDA(call) { \
+    cudaError_t err = call; \
+    if (err != cudaSuccess) { \
+        fprintf(stderr, "CUDA Error: %s (Line %d)\n", cudaGetErrorString(err), __LINE__); \
+        exit(1); \
+    } \
+}
+
 // --- Precomputation Management ---
 
 void generate_tables() {
@@ -103,16 +113,6 @@ void load_tables() {
 #define BATCH_SIZE ATTEMPTS_PER_BATCH // Alias for clarity with user instructions
 #define RING_BUFFER_SIZE 1024  // Power of 2
 #define RING_BUFFER_MASK (RING_BUFFER_SIZE - 1)
-
-// --- Macros ---
-
-#define CHECK_CUDA(call) { \
-    cudaError_t err = call; \
-    if (err != cudaSuccess) { \
-        fprintf(stderr, "CUDA Error: %s (Line %d)\n", cudaGetErrorString(err), __LINE__); \
-        exit(1); \
-    } \
-}
 
 // --- Data Structures ---
 
