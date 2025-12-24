@@ -25,7 +25,8 @@ This roadmap tracks the development progress of the VanityForge platform, from t
 ### 🚧 IN PROGRESS / Q1 2026
 
 **Performance & Engine**
-*   **Rust CPU Miner (`cpu-grinder`):** developing a high-performance Rust-based miner to upgrade the Free Tier speed.
+*   **Phase 3: 100% L4 GPU Transition:** [Current/Live] Migrating all workload to the Titanium GPU Cluster.
+*   **CPU/GPU Hybrid Tiering:** [Completed/Deprecated] Hybrid model replaced by single-lane GPU architecture.
 *   **Public API for Developers:** Creating a standardized API for third-party integrations.
 
 **User Experience (UX)**

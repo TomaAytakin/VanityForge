@@ -54,7 +54,6 @@ MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
 REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', "projects/vanityforge/locations/us-central1/jobs/vanity-gpu-redpanda")
-CPU_JOB_NAME = os.getenv('CPU_JOB_NAME', "projects/vanityforge/locations/europe-west1/jobs/vanity-gpu-worker")
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -104,16 +103,11 @@ def is_base58(s):
     return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', s))
 
 # --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
-def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin, worker_type):
-    """Triggers the remote Cloud Run Job (CPU or GPU)."""
+def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
+    """Triggers the remote Cloud Run Job (Titanium GPU Cluster)."""
     try:
-        # Determine Target Job
-        if worker_type == "cloud-run-gpu-redpanda":
-            target_job = REDPANDA_JOB_NAME
-            logging.info("🏎️ Dispatching to RedPanda GPU Lane")
-        else:
-            target_job = CPU_JOB_NAME
-            logging.info("🚙 Dispatching to Standard CPU Lane")
+        target_job = REDPANDA_JOB_NAME
+        logging.info("🏎️ Dispatching to Titanium GPU Cluster")
 
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(
@@ -354,8 +348,7 @@ def scheduler_loop():
                             data.get('prefix'),
                             data.get('suffix'),
                             data.get('case_sensitive', True),
-                            pin_plain,
-                            data.get('worker_type', 'cloud-run-cpu') # Default to CPU if missing
+                            pin_plain
                         )
 
                         running_cloud += 1
@@ -551,7 +544,7 @@ def submit_job():
     prefix, suffix = data.get('prefix'), data.get('suffix', '')
     pin, tx_sig = data.get('pin'), data.get('transaction_signature')
     email, notify = data.get('email'), data.get('notify', False)
-    use_gpu = data.get('use_gpu', False)
+    # use_gpu ignored, 100% GPU now
     referral_code = data.get('referral_code', '').strip().upper()
     
     if not user_id or not pin: return jsonify({'error': 'Missing ID or PIN'}), 400
@@ -602,13 +595,9 @@ def submit_job():
 
         if not bcrypt.checkpw(pin.encode(), user_data.get('pin_hash').encode()): return jsonify({'error': 'Invalid PIN'}), 401
         
-        # --- DETERMINE JOB TYPE (CLOUD vs LOCAL) ---
+        # --- DETERMINE JOB TYPE ---
         total_len = len(prefix or '') + len(suffix or '')
         
-        # Automatic GPU Routing > 5
-        if total_len >= 6:
-            use_gpu = True
-
         # Prices Logic
         if total_len <= 4: base = 0.25
         elif total_len == 5: base = 0.50
@@ -617,9 +606,7 @@ def submit_job():
         elif total_len == 8: base = 3.00
         else: base = 5.00
 
-        # GPU Surcharge
-        if use_gpu:
-            base = base * 1.5
+        # Note: GPU Surcharge removed as we are 100% GPU now.
         
         # Free logic: <5 chars AND trials remaining OR Admin/God Mode
         if is_admin:
@@ -644,21 +631,7 @@ def submit_job():
         
         # --- JOB QUEUE LOGIC ---
         # Determine Worker Type & Cloud Status
-        # Default to CPU
-        worker_type = "cloud-run-cpu"
-
-        # Trial Logic (Price 0 and not God Mode)
-        is_trial_job = (price == 0) and not is_god_mode
-
-        if is_trial_job:
-            # Trial users always use CPU
-            worker_type = "cloud-run-cpu"
-        else:
-            # Paid users (or God Mode) get GPU if requested or hard
-            if use_gpu or total_len >= 6:
-                worker_type = "cloud-run-gpu-redpanda"
-            else:
-                worker_type = "cloud-run-cpu"
+        worker_type = "cloud-run-gpu-redpanda"
 
         is_cloud_job = True
 

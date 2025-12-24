@@ -86,7 +86,10 @@
         <span>Vanity Identities Forged: <span id="identity-counter" class="text-white font-bold text-base">...</span></span>
     </div>
 
-    <div class="w-full max-w-2xl mb-8 flex justify-center mt-10">
+    <div class="w-full max-w-2xl mb-8 flex flex-col items-center justify-center mt-10 gap-4">
+        <div class="bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold py-2 px-6 rounded-full shadow-lg border border-green-400 flex items-center gap-2 animate-pulse">
+            <i class="fa-brands fa-nvidia"></i> ⚡ Now Powered Exclusively by NVIDIA L4
+        </div>
         <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
     </div>
 
@@ -221,12 +224,9 @@
                     </div>
                 </div>
 
-                <div id="gpu-option-container" class="hidden flex items-center gap-2 p-2 bg-purple-900/20 rounded border border-purple-500/30">
-                     <input type="checkbox" id="use-gpu" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
-                     <label for="use-gpu" class="text-sm text-gray-300 cursor-pointer select-none flex items-center gap-2">
-                        <i class="fa-solid fa-bolt text-yellow-400"></i>
-                        <span>Use GPU Turbo Mode (+50% Cost)</span>
-                     </label>
+                <!-- GPU Option Removed: Now Default -->
+                <div class="hidden flex items-center gap-2 p-2 bg-purple-900/20 rounded border border-purple-500/30">
+                     <input type="checkbox" id="use-gpu" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2" checked disabled>
                 </div>
             </div>
 
@@ -875,26 +875,9 @@
             const s = document.getElementById('suffix').value || "";
             const totalLen = p.length + s.length;
 
-            const gpuContainer = document.getElementById('gpu-option-container');
+            // use-gpu is always true now
             const useGpuCheckbox = document.getElementById('use-gpu');
-
-            // GPU Logic
-            if (totalLen >= 6) {
-                // Force GPU
-                gpuContainer.classList.remove('hidden');
-                useGpuCheckbox.checked = true;
-                useGpuCheckbox.disabled = true;
-                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>High-Speed GPU Forge Required</span>';
-            } else if (totalLen >= 4) {
-                // Optional GPU
-                gpuContainer.classList.remove('hidden');
-                useGpuCheckbox.disabled = false;
-                useGpuCheckbox.nextElementSibling.innerHTML = '<i class="fa-solid fa-bolt text-yellow-400"></i><span>Use GPU Turbo Mode (+50% Cost)</span>';
-            } else {
-                // Hide
-                gpuContainer.classList.add('hidden');
-                useGpuCheckbox.checked = false;
-            }
+            if (useGpuCheckbox) useGpuCheckbox.checked = true;
 
             if (totalLen === 0) {
                 document.getElementById('calc-difficulty').innerText = "0 chars";
@@ -912,10 +895,7 @@
             else if (totalLen === 8) basePrice = 3.00;
             else basePrice = 5.00;
 
-            // Apply GPU Surcharge if selected (or forced)
-            if (useGpuCheckbox.checked) {
-                basePrice = basePrice * 1.5;
-            }
+            // No GPU Surcharge anymore - everyone gets GPU
 
             // Apply 50% Discount (on the final price)
             let finalPrice = basePrice * 0.5;
@@ -937,24 +917,26 @@
                 finalPrice = 0;
             }
 
-            // Time Estimate
-            // Time (seconds) = (0.5 * 58^TotalLength) / Speed
-            // Speed: CPU ~5M/s, GPU ~500M/s? (Assume 100x or just significantly faster)
-            let speed = 5000000;
-            if (useGpuCheckbox.checked) {
-                speed = 500000000; // 500M/s
-            }
+            // Time Estimate Logic
+            // New Formula: (Difficulty / 300,000,000) + 600
+            // Difficulty = 0.5 * 58^TotalLength
+            // 600s buffer for cloud provisioning
 
-            let seconds = (0.5 * Math.pow(58, totalLen)) / speed;
+            let difficulty = 0.5 * Math.pow(58, totalLen);
+            let speed = 300000000; // 300 MH/s
+            let buffer = 600; // 10 minutes
+
+            let seconds = (difficulty / speed) + buffer;
+
             let timeStr;
-            if (seconds < 1) timeStr = "Instant";
-            else if (seconds < 60) timeStr = Math.ceil(seconds) + "s";
-            else if (seconds < 3600) timeStr = Math.ceil(seconds/60) + "m";
+            // Always show minutes if < hour, else hours/days
+            // Since min is 600s (10m), we start at 10m
+            if (seconds < 3600) timeStr = Math.ceil(seconds/60) + "m";
             else if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + "h";
             else timeStr = (seconds/86400).toFixed(1) + "d";
 
             document.getElementById('calc-difficulty').innerText = totalLen + " chars";
-            document.getElementById('calc-time').innerText = timeStr;
+            document.getElementById('calc-time').innerText = "~" + timeStr;
 
             const costEl = document.getElementById('calc-cost');
             if (isTrial) {
@@ -986,7 +968,7 @@
             });
         });
 
-        document.getElementById('use-gpu').addEventListener('change', updateEstimates);
+        // document.getElementById('use-gpu').addEventListener('change', updateEstimates);
         // EMAIL NOTIFICATION LOGIC
         document.getElementById('email-notify').addEventListener('change', async function(e) {
             if (this.checked && !currentUserEmail) {
@@ -1037,7 +1019,7 @@
             const suffix = document.getElementById('suffix').value;
             const caseSensitive = document.getElementById('case-sensitive').checked;
             const notify = document.getElementById('email-notify').checked;
-            const useGpu = document.getElementById('use-gpu').checked;
+            const useGpu = true; // Always true
 
             const errorEl = document.getElementById('submit-error');
             const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
@@ -1057,13 +1039,8 @@
             else if (totalLen === 8) basePrice = 3.00;
             else basePrice = 5.00;
 
-            // GPU Surcharge
-            if (useGpu) {
-                basePrice = basePrice * 1.5;
-                submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing RedPanda Engine...';
-            } else {
-                submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
-            }
+            // No GPU Surcharge
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing RedPanda Engine...';
 
             // Apply 50% Discount
             let cost = basePrice * 0.5;
