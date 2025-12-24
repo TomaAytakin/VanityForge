@@ -144,7 +144,7 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
 
         process.wait()
 
-        if process.returncode != 0:
+        if not found_json and process.returncode != 0:
             logging.error(f"Binary Error: Return Code {process.returncode}")
             return None, None
 

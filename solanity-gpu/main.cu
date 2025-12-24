@@ -39,7 +39,7 @@
 #define BLOCK_SIZE 256
 // ATTEMPTS_PER_BATCH: How many adds before checking ring buffer / stats?
 // Too small: overhead. Too large: latency. 256 is fine.
-#define ATTEMPTS_PER_BATCH 256
+#define ATTEMPTS_PER_BATCH 4096
 #define BATCH_SIZE ATTEMPTS_PER_BATCH // Alias for clarity with user instructions
 #define RING_BUFFER_SIZE 1024  // Power of 2
 #define RING_BUFFER_MASK (RING_BUFFER_SIZE - 1)
