@@ -47,7 +47,7 @@ SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT"))
 
 # --- ADMIN LIST (GOD MODE) ---
-ADMIN_EMAILS = {"tomaaytakin@gmail.com", "admin@vanityforge.org", "Jonny95hidalgo@gmail.com"}
+ADMIN_EMAILS = set(os.getenv('ADMIN_EMAILS', "tomaaytakin@gmail.com,admin@vanityforge.org,Jonny95hidalgo@gmail.com").split(','))
 
 # --- QUEUE LIMITS (TRAFFIC CONTROL) ---
 MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run

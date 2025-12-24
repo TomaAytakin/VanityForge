@@ -156,7 +156,8 @@ def run_gpu_grinder(prefix, suffix, gpu_index=0):
             data = json.loads(final_json_str)
         except json.JSONDecodeError as e:
              logging.error(f"Error parsing GPU output: {e}")
-             logging.error(f"Raw output: {final_json_str}")
+             # REDACTED RAW OUTPUT FOR SECURITY
+             logging.error("Raw output redacted due to potential sensitive content.")
              return None, None
 
         address = data.get("public_key")
