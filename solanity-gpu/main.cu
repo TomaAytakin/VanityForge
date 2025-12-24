@@ -30,10 +30,69 @@
 // Include ECC headers
 #include "fixedint.h"
 #include "fe.cu"
+#include "ge.h"           // Define ge_precomp struct before using it in precomp_data.h
+#include "precomp_data.h" // Include BEFORE ge.cu so 'base' is visible
 #include "ge.cu"
 // We do NOT include sha512.cu for the kernel, only for host if needed.
 // Actually, we need SHA-512 for the Host (Phase 2) to potentially re-verify or seed init.
 #include "sha512.cu"
+
+// --- Precomputation Management ---
+
+void generate_tables() {
+    FILE* f = fopen("precomp_tables.bin", "wb");
+    if (!f) {
+        fprintf(stderr, "Error: Could not open precomp_tables.bin for writing.\n");
+        exit(1);
+    }
+    // base is defined in precomp_data.h
+    size_t written = fwrite(base, sizeof(ge_precomp), 32 * 8, f);
+    if (written != 32 * 8) {
+        fprintf(stderr, "Error: Failed to write all table data.\n");
+        exit(1);
+    }
+    fclose(f);
+    printf("Precomputed tables generated: precomp_tables.bin\n");
+}
+
+void load_tables() {
+    FILE* f = fopen("precomp_tables.bin", "rb");
+    if (!f) {
+        // Fallback: Generate if missing (Auto-healing)
+        printf("Tables not found. Generating...\n");
+        generate_tables();
+        f = fopen("precomp_tables.bin", "rb");
+        if (!f) {
+            fprintf(stderr, "Error: Could not open precomp_tables.bin for reading.\n");
+            exit(1);
+        }
+    }
+
+    // Allocate temp buffer
+    ge_precomp* host_base = (ge_precomp*)malloc(sizeof(ge_precomp) * 32 * 8);
+    if (!host_base) {
+        fprintf(stderr, "Error: Malloc failed for host_base.\n");
+        exit(1);
+    }
+
+    size_t read_count = fread(host_base, sizeof(ge_precomp), 32 * 8, f);
+    fclose(f);
+
+    if (read_count != 32 * 8) {
+        fprintf(stderr, "Error: precomp_tables.bin is corrupted (Read %zu items).\n", read_count);
+        // Try to regenerate once?
+        generate_tables();
+        // Recurse once? No, simpler to just exit or reload.
+        // For robustness, let's just exit.
+        exit(1);
+    }
+
+    // Copy to Constant Memory
+    // c_base is defined in ge.cu
+    CHECK_CUDA(cudaMemcpyToSymbol(c_base, host_base, sizeof(ge_precomp) * 32 * 8));
+    free(host_base);
+    printf("Precomputed tables loaded to Constant Memory.\n");
+}
 
 // --- Configuration ---
 
@@ -313,9 +372,16 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--prefix-val")==0 && i+1<argc) prefix_val = strtoull(argv[i+1], NULL, 16);
         if (strcmp(argv[i], "--mask-val")==0 && i+1<argc) mask_val = strtoull(argv[i+1], NULL, 16);
         if (strcmp(argv[i], "--gpu-index")==0 && i+1<argc) device = atoi(argv[i+1]);
+        if (strcmp(argv[i], "--generate-tables")==0) {
+            generate_tables();
+            return 0;
+        }
     }
 
     cudaSetDevice(device);
+
+    // Load Tables (Fast Path)
+    load_tables();
 
     DeviceRingBuffer* d_ring;
     Stats* d_stats;

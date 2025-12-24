@@ -17,6 +17,9 @@ COPY . /app
 # Build the CUDA application
 RUN make -B
 
+# Generate precomputed tables during build to avoid startup lag
+RUN ./solanity --generate-tables
+
 # Install Python requirements
 RUN pip3 install -r requirements.txt
 

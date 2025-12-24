@@ -1,5 +1,8 @@
 #include "ge.h"
-#include "precomp_data.h"
+// #include "precomp_data.h" // Moved to main.cu for better JIT control
+
+// Device-side constant memory for precomputed table
+__constant__ ge_precomp c_base[32][8];
 
 #ifndef GE_CU
 #define GE_CU
@@ -362,14 +365,29 @@ static void __forceinline__ __host__ __device__ select(ge_precomp *t, int pos, s
     fe_1(t->yplusx);
     fe_1(t->yminusx);
     fe_0(t->xy2d);
-    cmov(t, &base[pos][0], equal(babs, 1));
-    cmov(t, &base[pos][1], equal(babs, 2));
-    cmov(t, &base[pos][2], equal(babs, 3));
-    cmov(t, &base[pos][3], equal(babs, 4));
-    cmov(t, &base[pos][4], equal(babs, 5));
-    cmov(t, &base[pos][5], equal(babs, 6));
-    cmov(t, &base[pos][6], equal(babs, 7));
-    cmov(t, &base[pos][7], equal(babs, 8));
+
+    #ifdef __CUDA_ARCH__
+        // Device path: Use constant memory
+        cmov(t, &c_base[pos][0], equal(babs, 1));
+        cmov(t, &c_base[pos][1], equal(babs, 2));
+        cmov(t, &c_base[pos][2], equal(babs, 3));
+        cmov(t, &c_base[pos][3], equal(babs, 4));
+        cmov(t, &c_base[pos][4], equal(babs, 5));
+        cmov(t, &c_base[pos][5], equal(babs, 6));
+        cmov(t, &c_base[pos][6], equal(babs, 7));
+        cmov(t, &c_base[pos][7], equal(babs, 8));
+    #else
+        // Host path: Use static table from precomp_data.h (via main.cu inclusion)
+        cmov(t, &base[pos][0], equal(babs, 1));
+        cmov(t, &base[pos][1], equal(babs, 2));
+        cmov(t, &base[pos][2], equal(babs, 3));
+        cmov(t, &base[pos][3], equal(babs, 4));
+        cmov(t, &base[pos][4], equal(babs, 5));
+        cmov(t, &base[pos][5], equal(babs, 6));
+        cmov(t, &base[pos][6], equal(babs, 7));
+        cmov(t, &base[pos][7], equal(babs, 8));
+    #endif
+
     fe_copy(minust.yplusx, t->yminusx);
     fe_copy(minust.yminusx, t->yplusx);
     fe_neg(minust.xy2d, t->xy2d);
