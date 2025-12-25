@@ -109,7 +109,7 @@ void load_tables() {
 #define BLOCK_SIZE 256
 // ATTEMPTS_PER_BATCH: How many adds before checking ring buffer / stats?
 // Too small: overhead. Too large: latency. 256 is fine.
-#define ATTEMPTS_PER_BATCH 8192
+#define ATTEMPTS_PER_BATCH 4096
 #define BATCH_SIZE ATTEMPTS_PER_BATCH // Alias for clarity with user instructions
 #define RING_BUFFER_SIZE 1024  // Power of 2
 #define RING_BUFFER_MASK (RING_BUFFER_SIZE - 1)
@@ -221,12 +221,12 @@ void phase1_filter_kernel(
             s[31] ^= (sign << 7); // Apply sign bit
 
             // 2. Binary Prefix Filter
-            // Load s[0..7] into uint64
+            // Load s[0..7] into uint64 (Little Endian to match Host/Python)
             uint64_t key_prefix =
-                ((uint64_t)s[0] << 56) | ((uint64_t)s[1] << 48) |
-                ((uint64_t)s[2] << 40) | ((uint64_t)s[3] << 32) |
-                ((uint64_t)s[4] << 24) | ((uint64_t)s[5] << 16) |
-                ((uint64_t)s[6] << 8)  | ((uint64_t)s[7]);
+                ((uint64_t)s[0])       | ((uint64_t)s[1] << 8) |
+                ((uint64_t)s[2] << 16) | ((uint64_t)s[3] << 24) |
+                ((uint64_t)s[4] << 32) | ((uint64_t)s[5] << 40) |
+                ((uint64_t)s[6] << 48) | ((uint64_t)s[7] << 56);
 
             if ((key_prefix & target_mask) == target_prefix) {
                 // Found!
@@ -302,7 +302,7 @@ void compute_prefix_target(const char* prefix_str, uint64_t* out_val, uint64_t* 
 // --- Host Logic: Phase 2 ---
 
 // Solve: reconstruct key from Ring Buffer item
-void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check) {
+void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check, uint64_t prefix_val, uint64_t mask_val) {
     // 1. Reconstruct Scalar
     // Old: scalar = tid + (iter_count * stride)
     // New: scalar = random_offset + tid + (iter_count * total_threads)
@@ -329,6 +329,19 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
 
     unsigned char publick[32];
     ge_p3_tobytes(publick, &A);
+
+    // 2b. Verify Prefix (Host Side Sanity Check)
+    // Must match Kernel's Little Endian logic
+    uint64_t check_prefix =
+        ((uint64_t)publick[0])       | ((uint64_t)publick[1] << 8) |
+        ((uint64_t)publick[2] << 16) | ((uint64_t)publick[3] << 24) |
+        ((uint64_t)publick[4] << 32) | ((uint64_t)publick[5] << 40) |
+        ((uint64_t)publick[6] << 48) | ((uint64_t)publick[7] << 56);
+
+    if ((check_prefix & mask_val) != prefix_val) {
+        printf("[Host] FALSE POSITIVE - IGNORING\n");
+        return;
+    }
 
     // 3. Base58 Encode
     char b58[128];
@@ -442,7 +455,7 @@ int main(int argc, char** argv) {
 
         while (local_read_head < write_head) {
             Candidate c = h_ring_mapped->items[local_read_head & RING_BUFFER_MASK];
-            phase2_solve(c.thread_id, c.iter_count, total_threads, random_offset, suffix);
+            phase2_solve(c.thread_id, c.iter_count, total_threads, random_offset, suffix, prefix_val, mask_val);
             local_read_head++;
             if (write_head - local_read_head > RING_BUFFER_SIZE) {
                 local_read_head = write_head;
