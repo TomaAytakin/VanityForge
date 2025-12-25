@@ -26,6 +26,8 @@
 #include <fcntl.h>
 #include <random>
 #include <chrono>
+#include <vector>
+#include <string>
 
 // Include ECC headers
 #include "fixedint.h"
@@ -256,6 +258,95 @@ void phase1_filter_kernel(
 
 // --- Host Helper Functions ---
 
+// Host constants and helpers for prefix calculation
+const char* B58_DIGITS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+int b58_index_host(char c) {
+    const char *p = strchr(B58_DIGITS, c);
+    if (p) return p - B58_DIGITS;
+    return -1;
+}
+
+typedef unsigned char uint8_t;
+
+void mul58(uint8_t *n) { // n is 32 bytes LE
+    int carry = 0;
+    for (int i = 0; i < 32; i++) {
+        int val = n[i] * 58 + carry;
+        n[i] = val & 0xFF;
+        carry = val >> 8;
+    }
+}
+
+void add_val(uint8_t *n, int v) { // n is 32 bytes LE
+    int carry = v;
+    for (int i = 0; i < 32 && carry; i++) {
+        int val = n[i] + carry;
+        n[i] = val & 0xFF;
+        carry = val >> 8;
+    }
+}
+
+void sub_val(uint8_t *n, int v) { // n is 32 bytes LE
+    int borrow = v;
+    for (int i = 0; i < 32 && borrow; i++) {
+        int val = n[i] - borrow;
+        if (val < 0) {
+            val += 256;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        n[i] = val;
+    }
+}
+
+uint64_t extract_top64(const uint8_t *n) {
+    // n is LE, so MSB is at 31
+    return ((uint64_t)n[31] << 56) | ((uint64_t)n[30] << 48) |
+           ((uint64_t)n[29] << 40) | ((uint64_t)n[28] << 32) |
+           ((uint64_t)n[27] << 24) | ((uint64_t)n[26] << 16) |
+           ((uint64_t)n[25] << 8)  | ((uint64_t)n[24]);
+}
+
+void compute_prefix_bounds(const char* prefix, uint64_t* min_out, uint64_t* max_out) {
+    uint8_t min_int[32] = {0};
+    uint8_t max_int[32] = {0};
+
+    // Decode P
+    for (int i = 0; prefix[i]; i++) {
+        mul58(min_int);
+        add_val(min_int, b58_index_host(prefix[i]));
+    }
+
+    // Copy to max_int
+    memcpy(max_int, min_int, 32);
+
+    // For max_int, we start with P+1
+    add_val(max_int, 1);
+
+    // Scale up
+    int len = strlen(prefix);
+    int target_len = 44;
+    int shifts = target_len - len;
+    if (shifts < 0) shifts = 0;
+
+    for (int i = 0; i < shifts; i++) {
+        mul58(min_int);
+        mul58(max_int);
+    }
+
+    // max_int = (P+1)*shift - 1
+    sub_val(max_int, 1);
+
+    *min_out = extract_top64(min_int);
+    *max_out = extract_top64(max_int);
+
+    // Safety widening
+    *min_out -= 4;
+    *max_out += 4;
+}
+
 // Base58 Encode (Host)
 bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz) {
     const char *b58digits_ordered = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -339,8 +430,16 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
 
     // 4. Exact Verification
     if (prefix_check && strlen(prefix_check) > 0) {
-        if (strncmp(b58, prefix_check, strlen(prefix_check)) != 0) {
-             printf("[Host] FALSE POSITIVE (Filter) - IGNORING\n");
+        if (strncmp(b58, prefix_check, strlen(prefix_check)) == 0) {
+             printf("KEY FOUND\n");
+             printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
+             for(int i=0; i<32; i++) printf("%d, ", scalar[i]);
+             for(int i=0; i<31; i++) printf("%d, ", publick[i]);
+             printf("%d]}\n", publick[31]);
+             fflush(stdout);
+             exit(0);
+        } else {
+             printf("FALSE POSITIVE (Filter)\n");
              return;
         }
     }
@@ -353,7 +452,7 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
         }
     }
 
-    // KEY FOUND
+    // KEY FOUND (Suffix only case, or if no prefix provided)
     printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
     for(int i=0; i<32; i++) printf("%d, ", scalar[i]);
     for(int i=0; i<31; i++) printf("%d, ", publick[i]);
@@ -372,6 +471,7 @@ int main(int argc, char** argv) {
     for(int i=1; i<argc; i++) {
         if (strcmp(argv[i], "--suffix")==0 && i+1<argc) suffix = argv[i+1];
         if (strcmp(argv[i], "--prefix-str")==0 && i+1<argc) prefix_str = argv[i+1];
+        if (strcmp(argv[i], "--prefix")==0 && i+1<argc) prefix_str = argv[i+1];
         if (strcmp(argv[i], "--device")==0 && i+1<argc) device = atoi(argv[i+1]);
         if (strcmp(argv[i], "--min-limit")==0 && i+1<argc) min_limit = strtoull(argv[i+1], NULL, 10);
         if (strcmp(argv[i], "--max-limit")==0 && i+1<argc) max_limit = strtoull(argv[i+1], NULL, 10);
@@ -380,6 +480,11 @@ int main(int argc, char** argv) {
             generate_tables();
             return 0;
         }
+    }
+
+    if (prefix_str) {
+        compute_prefix_bounds(prefix_str, &min_limit, &max_limit);
+        printf("Computed bounds for prefix '%s': %llu - %llu\n", prefix_str, (unsigned long long)min_limit, (unsigned long long)max_limit);
     }
 
     cudaSetDevice(device);
