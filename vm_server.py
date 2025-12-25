@@ -17,7 +17,8 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, abort
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_cors import CORS
 from google.cloud import firestore
 from google.cloud import run_v2
@@ -61,6 +62,18 @@ if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
     exit(1)
 
 app = Flask(__name__, static_folder='.', static_url_path='', template_folder='.')
+
+# Fix IP logging to trust Google Cloud Load Balancer headers
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+@app.before_request
+def block_hidden_paths():
+    # Block any path starting with '.' or containing '/.' (e.g. /.env, /.git/config)
+    if request.path.startswith("/.") or "/." in request.path:
+        real_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        app.logger.warning(f"🚨 SECURITY: Blocked attempt to access {request.path} from {real_ip}")
+        abort(403)
+
 CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
 
 # --- RATE LIMITER CONFIGURATION ---
