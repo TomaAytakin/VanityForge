@@ -9,3 +9,4 @@ bcrypt
 python-dotenv
 requests
 Flask-Limiter
+firebase-admin

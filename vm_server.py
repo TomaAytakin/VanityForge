@@ -22,6 +22,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_cors import CORS
 from google.cloud import firestore
 from google.cloud import run_v2
+import firebase_admin
+from firebase_admin import credentials, auth
 from solders.keypair import Keypair
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -63,6 +65,14 @@ if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
     logging.critical("CRITICAL ERROR: Missing environment variables. Make sure .env exists.")
     exit(1)
 
+# --- FIREBASE ADMIN INIT ---
+try:
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app()
+    logging.info("🔥 Firebase Admin Initialized")
+except Exception as e:
+    logging.warning(f"⚠️ Firebase Admin Init Failed: {e}")
+
 app = Flask(__name__, static_folder='.', static_url_path='', template_folder='.')
 app.secret_key = os.getenv('FLASK_SECRET_KEY', os.urandom(24).hex())
 
@@ -97,10 +107,25 @@ limiter = Limiter(
 def ratelimit_handler(e):
     return jsonify({'error': 'Rate limit exceeded'}), 429
 
+def is_admin_session():
+    """Checks if the current session belongs to an admin."""
+    email = session.get('email')
+    if not email: return False
+
+    # 1. Existing/Global Config (Plural)
+    admins = globals().get('ADMIN_EMAILS') or set(os.getenv('ADMIN_EMAILS', '').split(','))
+
+    # 2. User Requested Config (Singular) - "Strictly rely on ADMIN_EMAIL"
+    single_admin = os.getenv('ADMIN_EMAIL')
+    if single_admin:
+        admins.add(single_admin)
+
+    return email in admins
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not session.get('is_admin'):
+        if not is_admin_session():
             return jsonify({'error': 'Unauthorized'}), 401
         return f(*args, **kwargs)
     return decorated_function
@@ -131,17 +156,13 @@ def rpc_proxy():
         return jsonify({'error': str(e)}), 500
 
 # --- ADMIN / GOD MODE ENDPOINTS ---
-@app.route('/admin-login', methods=['POST'])
-@limiter.limit("10 per minute")
-def admin_login():
-    data = request.get_json(silent=True) or {}
-    password = data.get('password')
-    if password == ADMIN_PASSWORD:
-        session['is_admin'] = True
-        resp = jsonify({'success': True})
-        resp.set_cookie('is_admin_flag', '1', max_age=3600, httponly=False) # For UI
-        return resp
-    return jsonify({'error': 'Invalid password'}), 401
+@app.route('/api/user-status', methods=['GET'])
+def user_status():
+    """Returns the admin status and email of the current session."""
+    return jsonify({
+        'isAdmin': is_admin_session(),
+        'email': session.get('email')
+    })
 
 @app.route('/api/admin/stats', methods=['GET'])
 @login_required
@@ -498,6 +519,20 @@ def scheduler_loop():
 def check_user():
     data = request.get_json(silent=True) or {}
     user_id = data.get('user_id')
+
+    # Securely verify ID token if provided
+    id_token = data.get('id_token')
+    if id_token:
+        try:
+            decoded_token = auth.verify_id_token(id_token)
+            verified_email = decoded_token.get('email')
+            if verified_email:
+                session['email'] = verified_email
+                logging.info(f"✅ Verified session for {verified_email}")
+        except Exception as e:
+            logging.warning(f"❌ Token Verification Failed: {e}")
+            # Do NOT set session email if verification fails
+
     db = None
     try:
         db = firestore.Client(project=PROJECT_ID)
