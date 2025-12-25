@@ -4,7 +4,6 @@ FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
 WORKDIR /app
 
 # Install build dependencies
-# We need python3 in builder to potentially run scripts or if the build uses it
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
@@ -14,21 +13,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . .
 
 # Build binary
-# The Makefile uses nvcc
 RUN make -B
 
 # Generate precomputed tables during build
-# This requires running the binary, so we need the runtime libs present in this image (which they are in devel)
 RUN ./solanity --generate-tables
 
 # Stage 2: Runtime environment
-# Use the official NVIDIA CUDA Runtime image to ensure all shared libraries are present
+# We recommend using the NVIDIA CUDA Runtime image to ensure all libraries are present.
 FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
 
 WORKDIR /app
 
-# Install Python runtime and curl (useful for healthchecks/debugging)
-# Using --no-install-recommends to keep image size small
+# Install Python runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
@@ -41,17 +37,21 @@ COPY --from=builder /app/precomp_tables.bin .
 COPY --from=builder /app/worker.py .
 COPY --from=builder /app/requirements.txt .
 
+# Copy entrypoint script
+COPY --from=builder /app/entrypoint.sh .
+
 # Install Python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Create a non-root user for security (Cloud Run best practice)
+# Create a non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app
 
-# Set executable permissions (must be done before switching user or by root)
-RUN chmod +x solanity
+# Set permissions
+RUN chmod +x solanity entrypoint.sh
 
 # Switch to non-root user
 USER appuser
 
 # Set entry point
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python3", "worker.py"]
