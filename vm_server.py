@@ -246,7 +246,8 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
                         {"name": "TASK_PIN", "value": str(pin)},
                         {"name": "TASK_USER_ID", "value": str(user_id)},
                         {"name": "TASK_MIN_LIMIT", "value": str(min_limit)},
-                        {"name": "TASK_MAX_LIMIT", "value": str(max_limit)}
+                        {"name": "TASK_MAX_LIMIT", "value": str(max_limit)},
+                        {"name": "SERVER_URL", "value": os.getenv("SERVER_URL", "https://vanityforge.org")}
                     ]
                 }]
             }
@@ -824,6 +825,58 @@ def submit_job():
     finally:
         # 3. CRITICAL CLEANUP: Ensure the client connection is closed immediately after use
         cleanup_firestore_client(db)
+
+@app.route('/api/worker/complete', methods=['POST'])
+def worker_complete():
+    data = request.get_json(silent=True) or {}
+    job_id = data.get('job_id')
+    public_key = data.get('public_key')
+    secret_key = data.get('secret_key')
+    error = data.get('error')
+
+    if not job_id: return jsonify({'error': 'Missing job_id'}), 400
+
+    db = None
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        job_ref = db.collection('vanity_jobs').document(job_id)
+        job = job_ref.get()
+
+        if not job.exists:
+             return jsonify({'error': 'Job not found'}), 404
+
+        job_data = job.to_dict()
+        if job_data.get('status') != 'RUNNING':
+             # If it's already completed or failed, we just return success to stop worker retries
+             return jsonify({'success': True, 'message': 'Job already processed'})
+
+        if error:
+            job_ref.update({'status': 'FAILED', 'error': error})
+            logging.error(f"Worker reported error for {job_id}: {error}")
+            return jsonify({'success': True})
+
+        if not public_key or not secret_key:
+            return jsonify({'error': 'Missing keys'}), 400
+
+        job_ref.update({
+            'status': 'COMPLETED',
+            'public_key': public_key,
+            'secret_key': secret_key,
+            'completed_at': firestore.SERVER_TIMESTAMP
+        })
+        logging.info(f"Job {job_id} completed successfully via Worker Callback.")
+
+        if job_data.get('notify') and job_data.get('email'):
+            send_completion_email(job_data['email'], public_key)
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        logging.exception("Worker Complete Error")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cleanup_firestore_client(db)
+
 
 @app.route('/reveal-key', methods=['POST'])
 @limiter.limit("5 per minute")

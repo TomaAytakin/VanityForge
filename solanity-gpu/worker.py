@@ -2,28 +2,18 @@ import subprocess
 import os
 import json
 import logging
-import firebase_admin
-from firebase_admin import credentials, firestore
 import base64
 import hashlib
 import sys
 import time
 import base58
+import requests
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
-
-# Initialize Firebase
-cred = credentials.ApplicationDefault()
-try:
-    firebase_admin.initialize_app(cred)
-except ValueError:
-    pass
-
-db = firestore.client()
 
 def get_deterministic_salt(user_id):
     return hashlib.sha256(user_id.encode()).digest()
@@ -33,21 +23,12 @@ def generate_key_from_pin(pin, user_id):
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
-def run_gpu_grinder(prefix, suffix, min_limit, max_limit, gpu_index=0):
+def run_gpu_grinder(prefix, suffix, gpu_index=0):
     cmd = ["./solanity"]
 
-    # New Logic: Pass explicit 64-bit bounds
-    if min_limit is not None and max_limit is not None:
-        cmd.extend(["--min-limit", str(min_limit)])
-        cmd.extend(["--max-limit", str(max_limit)])
-        # Also pass prefix for CPU verification
-        cmd.extend(["--prefix-str", prefix])
-    else:
-        # Fallback (Should not happen with updated vm_server)
-        logging.warning("No limits provided, defaulting to pass-all (0-0xFFFFFFFFFFFFFFFF)")
-        cmd.extend(["--min-limit", "0"])
-        cmd.extend(["--max-limit", "18446744073709551615"])
-        cmd.extend(["--prefix-str", prefix or ""])
+    # Updated Logic: Only pass prefix, binary handles range calc if needed or just scans
+    # The C++ binary was refactored to handle --prefix-str directly for filtering
+    cmd.extend(["--prefix-str", prefix or ""])
 
     if suffix:
         cmd.extend(["--suffix", suffix])
@@ -124,32 +105,26 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Error running nvidia-smi: {e}")
 
-    try:
-        subprocess.run(["nvcc", "--version"], check=False)
-    except FileNotFoundError:
-        logging.warning("nvcc not found. This may be normal in runtime containers.")
-    except Exception as e:
-        logging.error(f"Error running nvcc: {e}")
+    # No nvcc check needed as we are in python runtime without nvcc likely
 
     TASK_JOB_ID = os.environ.get("TASK_JOB_ID")
     TASK_PREFIX = os.environ.get("TASK_PREFIX", "")
     TASK_SUFFIX = os.environ.get("TASK_SUFFIX", "")
     TASK_PIN = os.environ.get("TASK_PIN")
     TASK_USER_ID = os.environ.get("TASK_USER_ID")
+    SERVER_URL = os.environ.get("SERVER_URL")
 
-    if not TASK_JOB_ID or not TASK_PIN or not TASK_USER_ID:
-        logging.error("Missing required environment variables: TASK_JOB_ID, TASK_PIN, TASK_USER_ID")
+    if not TASK_JOB_ID or not TASK_PIN or not TASK_USER_ID or not SERVER_URL:
+        logging.error("Missing required environment variables: TASK_JOB_ID, TASK_PIN, TASK_USER_ID, SERVER_URL")
         sys.exit(1)
 
     logging.info(f"Worker started for Job ID: {TASK_JOB_ID}")
 
     try:
-        job_ref = db.collection('vanity_jobs').document(TASK_JOB_ID)
+        # No more Firebase DB initialization
 
-        TASK_MIN_LIMIT = os.environ.get("TASK_MIN_LIMIT")
-        TASK_MAX_LIMIT = os.environ.get("TASK_MAX_LIMIT")
-
-        address, secret = run_gpu_grinder(TASK_PREFIX, TASK_SUFFIX, TASK_MIN_LIMIT, TASK_MAX_LIMIT)
+        # Remove min/max limit usage as requested
+        address, secret = run_gpu_grinder(TASK_PREFIX, TASK_SUFFIX)
 
         if address and secret:
             key = generate_key_from_pin(TASK_PIN, TASK_USER_ID)
@@ -158,36 +133,51 @@ if __name__ == "__main__":
             success = False
             for attempt in range(5):
                 try:
-                    job_ref.update({
-                        'status': 'COMPLETED',
+                    payload = {
+                        'job_id': TASK_JOB_ID,
                         'public_key': address,
-                        'secret_key': enc_key,
-                        'completed_at': firestore.SERVER_TIMESTAMP
-                    })
-                    job_ref.get()
-                    logging.info("INFO: FOUND_KEY_UPDATE_SUCCESS")
-                    logging.info(f"Job {TASK_JOB_ID} completed successfully. Address: {address}")
-                    success = True
-                    break
+                        'secret_key': enc_key
+                    }
+                    resp = requests.post(f"{SERVER_URL}/api/worker/complete", json=payload, timeout=10)
+
+                    if resp.status_code == 200:
+                        logging.info("INFO: SERVER_UPDATE_SUCCESS")
+                        logging.info(f"Job {TASK_JOB_ID} reported successfully. Address: {address}")
+                        success = True
+                        break
+                    else:
+                        logging.warning(f"Warning: Server update failed (status {resp.status_code}): {resp.text}")
+                        time.sleep(2 ** attempt)
+
                 except Exception as update_err:
-                    logging.warning(f"Warning: Firestore update failed (attempt {attempt+1}/5): {update_err}")
+                    logging.warning(f"Warning: Server connection failed (attempt {attempt+1}/5): {update_err}")
                     time.sleep(2 ** attempt)
 
             if not success:
-                logging.error("ERROR: FIRESTORE_UPDATE_FAILED")
+                logging.error("ERROR: SERVER_UPDATE_FAILED")
                 sys.exit(1)
 
             sys.exit(0)
 
         else:
             logging.error("Failed to generate address.")
-            job_ref.update({'status': 'FAILED', 'error': 'GPU Worker failed to generate address'})
+            # Report failure to server
+            try:
+                requests.post(f"{SERVER_URL}/api/worker/complete", json={
+                    'job_id': TASK_JOB_ID,
+                    'error': 'GPU Worker failed to generate address'
+                }, timeout=10)
+            except:
+                pass
             sys.exit(1)
 
     except Exception as e:
         logging.exception(f"Worker failed: {e}")
         try:
-            db.collection('vanity_jobs').document(TASK_JOB_ID).update({'status': 'FAILED', 'error': str(e)})
+            requests.post(f"{SERVER_URL}/api/worker/complete", json={
+                'job_id': TASK_JOB_ID,
+                'error': str(e)
+            }, timeout=10)
         except:
             pass
         sys.exit(1)
