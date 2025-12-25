@@ -17,7 +17,7 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask import Flask, request, jsonify, render_template, abort
+from flask import Flask, request, jsonify, render_template, abort, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_cors import CORS
 from google.cloud import firestore
@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from dotenv import load_dotenv
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from functools import wraps
 
 # 1. LOAD SECRETS
 load_dotenv()
@@ -46,6 +47,7 @@ os.environ.setdefault("SMTP_SERVER", "smtp.gmail.com")
 os.environ.setdefault("SMTP_PORT", "587")
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT"))
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 
 # --- ADMIN LIST (GOD MODE) ---
 ADMIN_EMAILS = set(os.getenv('ADMIN_EMAILS', "tomaaytakin@gmail.com,admin@vanityforge.org,Jonny95hidalgo@gmail.com").split(','))
@@ -62,6 +64,7 @@ if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
     exit(1)
 
 app = Flask(__name__, static_folder='.', static_url_path='', template_folder='.')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', os.urandom(24).hex())
 
 # Fix IP logging to trust Google Cloud Load Balancer headers
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -74,6 +77,13 @@ def block_hidden_paths():
         app.logger.warning(f"🚨 SECURITY: Blocked attempt to access {request.path} from {real_ip}")
         abort(403)
 
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Content-Security-Policy'] = "default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval';"
+    return response
+
 CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
 
 # --- RATE LIMITER CONFIGURATION ---
@@ -82,6 +92,18 @@ limiter = Limiter(
     app=app,
     storage_uri="memory://"
 )
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({'error': 'Rate limit exceeded'}), 429
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('is_admin'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route('/')
 def index(): return app.send_static_file('index.html')
@@ -96,6 +118,57 @@ def vvvip():
 
 @app.route('/faq')
 def faq(): return app.send_static_file('faq.html')
+
+# --- RPC PROXY ---
+@app.route('/api/rpc', methods=['POST'])
+@limiter.limit("100 per minute")
+def rpc_proxy():
+    data = request.get_json(silent=True) or {}
+    try:
+        resp = requests.post(SOLANA_RPC_URL, json=data, timeout=10)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- ADMIN / GOD MODE ENDPOINTS ---
+@app.route('/admin-login', methods=['POST'])
+@limiter.limit("10 per minute")
+def admin_login():
+    data = request.get_json(silent=True) or {}
+    password = data.get('password')
+    if password == ADMIN_PASSWORD:
+        session['is_admin'] = True
+        resp = jsonify({'success': True})
+        resp.set_cookie('is_admin_flag', '1', max_age=3600, httponly=False) # For UI
+        return resp
+    return jsonify({'error': 'Invalid password'}), 401
+
+@app.route('/api/admin/stats', methods=['GET'])
+@login_required
+def admin_stats():
+    return jsonify({
+        'income_1w': 12.5,
+        'income_1m': 45.0,
+        'income_1y': 150.2,
+        'total_users': 1337,
+        'server_health': 'OK'
+    })
+
+@app.route('/api/admin/security', methods=['GET'])
+@login_required
+def admin_security():
+    return jsonify([
+        {'ip': '1.2.3.4', 'reason': 'Rate Limit Exceeded', 'time': '10 mins ago'},
+        {'ip': '5.6.7.8', 'reason': 'Path Traversal', 'time': '1 hour ago'}
+    ])
+
+@app.route('/api/admin/referrals', methods=['GET'])
+@login_required
+def admin_referrals():
+    return jsonify([
+        {'code': 'ABCD', 'earnings': 10.5},
+        {'code': 'XYZ1', 'earnings': 5.2}
+    ])
 
 # --- REFERRAL SYSTEM HELPERS ---
 def generate_referral_code():
@@ -420,6 +493,7 @@ def scheduler_loop():
         time.sleep(5)
 
 @app.route('/check-user', methods=['POST'])
+@limiter.limit("20 per minute")
 def check_user():
     data = request.get_json(silent=True) or {}
     user_id = data.get('user_id')
@@ -438,6 +512,7 @@ def check_user():
         cleanup_firestore_client(db)
 
 @app.route('/set-pin', methods=['POST'])
+@limiter.limit("5 per minute")
 def set_pin():
     data = request.get_json(silent=True) or {}
     user_id, pin = data.get('user_id'), data.get('pin')
@@ -453,6 +528,7 @@ def set_pin():
 
 # --- REFERRAL ENDPOINTS ---
 @app.route('/api/referral/create', methods=['POST'])
+@limiter.limit("30 per minute")
 def create_referral():
     data = request.get_json(silent=True) or {}
     user_id, pin = data.get('user_id'), data.get('pin')
@@ -499,6 +575,7 @@ def create_referral():
         cleanup_firestore_client(db)
 
 @app.route('/api/referral/stats', methods=['GET'])
+@limiter.limit("30 per minute")
 def referral_stats():
     user_id = request.args.get('user_id')
     if not user_id: return jsonify({'error': 'Missing user_id'}), 400
@@ -514,6 +591,7 @@ def referral_stats():
         cleanup_firestore_client(db)
 
 @app.route('/api/referral/validate', methods=['POST'])
+@limiter.limit("30 per minute")
 def validate_referral():
     data = request.get_json(silent=True) or {}
     code = data.get('code', '').strip().upper()
@@ -531,6 +609,7 @@ def validate_referral():
         cleanup_firestore_client(db)
 
 @app.route('/api/referral/withdraw', methods=['POST'])
+@limiter.limit("30 per minute")
 def withdraw_referral():
     data = request.get_json(silent=True) or {}
     user_id, pin = data.get('user_id'), data.get('pin')
@@ -747,6 +826,7 @@ def submit_job():
         cleanup_firestore_client(db)
 
 @app.route('/reveal-key', methods=['POST'])
+@limiter.limit("5 per minute")
 def reveal_key():
     data = request.get_json(silent=True) or {}
     job_id, pin = data.get('job_id'), data.get('pin')

@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     initLiveActivityCounter();
+    checkAdmin();
 });
 
 function initLiveActivityCounter() {
@@ -62,3 +63,86 @@ function initLiveActivityCounter() {
     // Start the loop
     scheduleNextPulse();
 }
+
+// --- GOD MODE / ADMIN DASHBOARD LOGIC ---
+function checkAdmin() {
+    // 1. Check for the weak cookie flag
+    const isAdmin = document.cookie.split(';').some((item) => item.trim().startsWith('is_admin_flag=1'));
+
+    if (isAdmin) {
+        // 2. Inject Navbar Item
+        const navContainer = document.querySelector('nav .md\\:block .ml-10');
+        if (navContainer) {
+            const devBtn = document.createElement('a');
+            devBtn.href = "#";
+            devBtn.id = "nav-dev";
+            devBtn.onclick = (e) => { e.preventDefault(); openAdminDashboard(); };
+            devBtn.className = "text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-3 py-2 rounded-md text-sm font-bold transition-colors animate-pulse";
+            devBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> DEV';
+            navContainer.appendChild(devBtn);
+        }
+    }
+}
+
+async function openAdminDashboard() {
+    // Reveal parent container if needed (God Mode Bypass)
+    const appInterface = document.getElementById('app-interface');
+    if (appInterface.classList.contains('hidden')) {
+        document.getElementById('auth-section').classList.add('hidden');
+        appInterface.classList.remove('hidden');
+    }
+
+    // Hide others
+    const sections = ['forge-section', 'referral-dashboard', 'job-queue-section'];
+    sections.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+
+    const dash = document.getElementById('admin-dashboard');
+    if (dash) dash.classList.remove('hidden');
+
+    // Fetch Initial Stats
+    showAdminTab('financials');
+}
+
+window.showAdminTab = async function(tabName) {
+    const tabs = ['financials', 'security', 'referrals-admin'];
+    tabs.forEach(t => {
+        const el = document.getElementById(`admin-${t}`);
+        if(el) {
+            if (t === tabName) el.classList.remove('hidden');
+            else el.classList.add('hidden');
+        }
+    });
+
+    if (tabName === 'financials') {
+        try {
+            const res = await fetch('/api/admin/stats');
+            const data = await res.json();
+            if (data.error) return alert("Auth Failed");
+            document.getElementById('admin-inc-1w').innerText = data.income_1w + " SOL";
+            document.getElementById('admin-inc-1m').innerText = data.income_1m + " SOL";
+            document.getElementById('admin-users').innerText = data.total_users;
+        } catch(e) { console.error(e); }
+    } else if (tabName === 'security') {
+        try {
+            const res = await fetch('/api/admin/security');
+            const data = await res.json();
+            const logDiv = document.getElementById('admin-sec-logs');
+            logDiv.innerHTML = data.map(l => `<div>[${l.time}] <strong>${l.ip}</strong>: ${l.reason}</div>`).join('');
+        } catch(e) { console.error(e); }
+    } else if (tabName === 'referrals-admin') {
+         try {
+            const res = await fetch('/api/admin/referrals');
+            const data = await res.json();
+            const listDiv = document.getElementById('admin-ref-list');
+            listDiv.innerHTML = data.map(r => `
+                <div class="flex justify-between bg-gray-800 p-2 rounded text-xs">
+                    <span class="font-mono text-purple-400">${r.code}</span>
+                    <span class="text-green-400">${r.earnings} SOL</span>
+                </div>
+            `).join('');
+        } catch(e) { console.error(e); }
+    }
+};

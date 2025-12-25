@@ -107,6 +107,50 @@
 
     <div id="app-interface" class="w-full max-w-2xl hidden space-y-6 animate-fade-in-up">
 
+        <!-- ADMIN DASHBOARD SECTION -->
+        <div id="admin-dashboard" class="glass-panel p-8 rounded-xl shadow-lg hidden">
+            <h2 class="text-xl font-bold mb-6 text-yellow-400 flex items-center gap-2 border-b border-gray-700 pb-2">
+                <i class="fa-solid fa-bolt"></i> God Mode Dashboard
+            </h2>
+
+            <div class="flex space-x-4 mb-6">
+                <button onclick="showAdminTab('financials')" class="text-white bg-gray-700 px-3 py-2 rounded-md text-sm font-bold">Financials</button>
+                <button onclick="showAdminTab('security')" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-bold">Security</button>
+                <button onclick="showAdminTab('referrals-admin')" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-bold">Referrals</button>
+            </div>
+
+            <div id="admin-financials">
+                <div class="grid grid-cols-3 gap-4 mb-4">
+                    <div class="bg-gray-800 p-4 rounded text-center">
+                        <span class="block text-gray-500 text-xs uppercase">Income (1W)</span>
+                        <span class="text-2xl font-bold text-green-400" id="admin-inc-1w">...</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded text-center">
+                        <span class="block text-gray-500 text-xs uppercase">Income (1M)</span>
+                        <span class="text-2xl font-bold text-green-400" id="admin-inc-1m">...</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded text-center">
+                        <span class="block text-gray-500 text-xs uppercase">Total Users</span>
+                        <span class="text-2xl font-bold text-blue-400" id="admin-users">...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="admin-security" class="hidden">
+                 <h3 class="text-sm font-bold text-gray-400 mb-2">Recent Security Events</h3>
+                 <div id="admin-sec-logs" class="bg-black/30 p-2 rounded h-40 overflow-y-auto font-mono text-xs text-red-300">
+                     Loading...
+                 </div>
+            </div>
+
+            <div id="admin-referrals-admin" class="hidden">
+                 <h3 class="text-sm font-bold text-gray-400 mb-2">Top Referrers</h3>
+                 <div id="admin-ref-list" class="space-y-2">
+                     Loading...
+                 </div>
+            </div>
+        </div>
+
         <!-- REFERRAL DASHBOARD SECTION -->
         <div id="referral-dashboard" class="glass-panel p-8 rounded-xl shadow-lg hidden">
             <h2 class="text-xl font-bold mb-6 text-purple-400 flex items-center gap-2 border-b border-gray-700 pb-2">
@@ -870,6 +914,11 @@
         }
 
         // CALCULATIONS (Helpers)
+        function escapeHtml(text) {
+            if (!text) return text;
+            return text.replace(/[&<>"']/g, function(m) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[m]; });
+        }
+
         function updateEstimates() {
             const p = document.getElementById('prefix').value || "";
             const s = document.getElementById('suffix').value || "";
@@ -1085,7 +1134,7 @@
                      // Use the dedicated Helius endpoint
                      // The user will replace the placeholder with their actual URL
                      // UPDATED WITH USER KEY
-                     const connection = new solanaWeb3.Connection("https://mainnet.helius-rpc.com/?api-key=03ad30eb-2c13-45e9-83bd-19187d14e21a", "confirmed");
+                     const connection = new solanaWeb3.Connection(window.location.origin + "/api/rpc", "confirmed");
                      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
                      transaction.recentBlockhash = blockhash;
                      // 3. Sign and Send
@@ -1208,7 +1257,7 @@
                             statusIcon = '<i class="fa-solid fa-times-circle"></i>';
                             resultHtml = `
                                 <div class="mt-1 text-[10px] text-red-400 italic">
-                                    ${job.error || "Job failed."}
+                                    ${escapeHtml(job.error || "Job failed.")}
                                 </div>
                             `;
                         } else {

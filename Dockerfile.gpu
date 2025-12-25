@@ -10,5 +10,9 @@ RUN make
 # Generate precomputed tables during build
 RUN ./solanity --generate-tables
 
+# Create non-root user
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Run the worker
 CMD ["python3", "worker.py"]

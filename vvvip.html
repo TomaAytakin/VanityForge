@@ -17,7 +17,7 @@
     </script>
     <script>
         // Inject RPC URL from Flask
-        window.SOLANA_RPC = "{{ rpc_url }}";
+        window.SOLANA_RPC = {{ rpc_url|tojson }};
     </script>
     <script type="module" src="utils/sns.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
