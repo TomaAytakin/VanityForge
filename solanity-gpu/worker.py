@@ -33,80 +33,21 @@ def generate_key_from_pin(pin, user_id):
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
-def calculate_prefix_range(prefix_str):
-    """
-    Calculates the target u64 value and mask for the GPU filter based on the Base58 prefix.
-    """
-    if not prefix_str:
-        return 0, 0
-
-    # Base58 Alphabet
-    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
-    # Calculate min: prefix + '1111...' (padding to ~44 chars, typical solana address)
-    # Calculate max: prefix + 'zzzz...'
-    # Typical address length is 32 bytes -> ~44 base58 chars.
-    target_len = 44
-    if len(prefix_str) > target_len:
-        target_len = len(prefix_str) # Should not happen
-
-    min_str = prefix_str.ljust(target_len, '1')
-    max_str = prefix_str.ljust(target_len, 'z')
-
-    try:
-        min_bytes = base58.b58decode(min_str)
-        max_bytes = base58.b58decode(max_str)
-
-        # Ensure 32 bytes. b58decode might return less if leading 1s (0s).
-        # We want top bytes.
-        # Pad left with 0s to 32 bytes
-        min_bytes = min_bytes.rjust(32, b'\0')
-        max_bytes = max_bytes.rjust(32, b'\0')
-
-        # Extract top 8 bytes (big endian for comparison)
-        min_val = int.from_bytes(min_bytes[:8], byteorder='big')
-        max_val = int.from_bytes(max_bytes[:8], byteorder='big')
-
-        # Calculate Common Prefix Mask
-        # XOR min and max. Bits that changed are 1.
-        diff = min_val ^ max_val
-
-        # Find highest set bit in diff.
-        # All bits ABOVE that are common.
-        if diff == 0:
-            mask = 0xFFFFFFFFFFFFFFFF
-        else:
-            # Power of 2 greater than diff
-            # Or scan from MSB.
-            # In Python, bit_length() gives bits required to represent.
-            # E.g. diff = 0b00101... -> bit_length = 3 (if 1 is at index 2).
-            # We want to clear bits from bit_length down to 0.
-            shift = diff.bit_length()
-            # Mask is all 1s shifted left by 'shift'.
-            # But wait, 64-bit mask.
-            mask = (0xFFFFFFFFFFFFFFFF << shift) & 0xFFFFFFFFFFFFFFFF
-
-        target = min_val & mask
-
-        return target, mask
-
-    except Exception as e:
-        logging.error(f"Error calculating prefix range: {e}")
-        return 0, 0
-
-def run_gpu_grinder(prefix, suffix, gpu_index=0):
+def run_gpu_grinder(prefix, suffix, min_limit, max_limit, gpu_index=0):
     cmd = ["./solanity"]
 
-    prefix_val, mask_val = calculate_prefix_range(prefix)
-
-    if prefix_val != 0:
-        cmd.extend(["--prefix-val", hex(prefix_val)])
-        cmd.extend(["--mask-val", hex(mask_val)])
-        logging.info(f"GPU Filter: Prefix={hex(prefix_val)} Mask={hex(mask_val)}")
+    # New Logic: Pass explicit 64-bit bounds
+    if min_limit is not None and max_limit is not None:
+        cmd.extend(["--min-limit", str(min_limit)])
+        cmd.extend(["--max-limit", str(max_limit)])
+        # Also pass prefix for CPU verification
+        cmd.extend(["--prefix-str", prefix])
     else:
-        logging.warning("GPU Filter: Passing 0 mask (Pass All). CPU will be overloaded!")
-        cmd.extend(["--prefix-val", "0"])
-        cmd.extend(["--mask-val", "0"])
+        # Fallback (Should not happen with updated vm_server)
+        logging.warning("No limits provided, defaulting to pass-all (0-0xFFFFFFFFFFFFFFFF)")
+        cmd.extend(["--min-limit", "0"])
+        cmd.extend(["--max-limit", "18446744073709551615"])
+        cmd.extend(["--prefix-str", prefix or ""])
 
     if suffix:
         cmd.extend(["--suffix", suffix])
@@ -204,7 +145,11 @@ if __name__ == "__main__":
 
     try:
         job_ref = db.collection('vanity_jobs').document(TASK_JOB_ID)
-        address, secret = run_gpu_grinder(TASK_PREFIX, TASK_SUFFIX)
+
+        TASK_MIN_LIMIT = os.environ.get("TASK_MIN_LIMIT")
+        TASK_MAX_LIMIT = os.environ.get("TASK_MAX_LIMIT")
+
+        address, secret = run_gpu_grinder(TASK_PREFIX, TASK_SUFFIX, TASK_MIN_LIMIT, TASK_MAX_LIMIT)
 
         if address and secret:
             key = generate_key_from_pin(TASK_PIN, TASK_USER_ID)
