@@ -102,12 +102,50 @@ def is_base58(s):
     if not s: return True
     return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', s))
 
+def calculate_top64_range(prefix_str):
+    """Calculates the Big-Endian uint64 range for the GPU Rejector."""
+    if not prefix_str:
+        return 0, 0xFFFFFFFFFFFFFFFF
+
+    try:
+        p_bytes = base58.b58decode(prefix_str)
+        P = int.from_bytes(p_bytes, byteorder='big')
+    except ValueError:
+        return 0, 0
+
+    # Target Length ~44 chars
+    shift_power = 44 - len(prefix_str)
+    if shift_power < 0: shift_power = 0
+    shift_factor = 58 ** shift_power
+
+    min_int = P * shift_factor
+    max_int = (P + 1) * shift_factor - 1
+    max_256 = 2**256 - 1
+
+    if min_int > max_256: return 0, 0 # Impossible
+    if max_int > max_256: max_int = max_256
+
+    def get_top_64(num):
+        b = num.to_bytes(32, byteorder='big')
+        return int.from_bytes(b[:8], byteorder='big')
+
+    min_limit = get_top_64(min_int)
+    max_limit = get_top_64(max_int)
+
+    # Safety Widening
+    min_limit = max(0, min_limit - 4)
+    max_limit = min(0xFFFFFFFFFFFFFFFF, max_limit + 4)
+
+    return min_limit, max_limit
+
 # --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
 def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
     """Triggers the remote Cloud Run Job (Titanium GPU Cluster)."""
     try:
         target_job = REDPANDA_JOB_NAME
         logging.info("🏎️ Dispatching to Titanium GPU Cluster")
+
+        min_limit, max_limit = calculate_top64_range(prefix)
 
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(
@@ -120,7 +158,9 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
                         {"name": "TASK_SUFFIX", "value": suffix or ""},
                         {"name": "TASK_CASE", "value": str(case_sensitive)},
                         {"name": "TASK_PIN", "value": str(pin)},
-                        {"name": "TASK_USER_ID", "value": str(user_id)}
+                        {"name": "TASK_USER_ID", "value": str(user_id)},
+                        {"name": "TASK_MIN_LIMIT", "value": str(min_limit)},
+                        {"name": "TASK_MAX_LIMIT", "value": str(max_limit)}
                     ]
                 }]
             }

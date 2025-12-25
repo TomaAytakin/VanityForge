@@ -140,8 +140,8 @@ __device__ __constant__ char B58_ALPHABET[59] = "123456789ABCDEFGHJKLMNPQRSTUVWX
 __global__ __launch_bounds__(BLOCK_SIZE, 1) // Force limit to increase occupancy if regs allow
 void phase1_filter_kernel(
     ge_p3 base_P,           // Starting Point (Unused, we init from scalar)
-    uint64_t target_prefix,
-    uint64_t target_mask,
+    uint64_t min_limit,
+    uint64_t max_limit,
     uint64_t random_offset, // Randomized Offset
     DeviceRingBuffer* ring,
     Stats* stats
@@ -220,15 +220,17 @@ void phase1_filter_kernel(
             fe_tobytes(s, y);
             s[31] ^= (sign << 7); // Apply sign bit
 
-            // 2. Binary Prefix Filter
-            // Load s[0..7] into uint64 (Little Endian to match Host/Python)
-            uint64_t key_prefix =
-                ((uint64_t)s[0])       | ((uint64_t)s[1] << 8) |
-                ((uint64_t)s[2] << 16) | ((uint64_t)s[3] << 24) |
-                ((uint64_t)s[4] << 32) | ((uint64_t)s[5] << 40) |
-                ((uint64_t)s[6] << 48) | ((uint64_t)s[7] << 56);
+            // 2. Binary Prefix Filter (Top-64 Bit Range Check)
+            // We need to construct the 64-bit integer Big-Endian style from Little Endian bytes.
+            // s[31] is the most significant byte of the Y coordinate.
+            uint64_t top64 =
+                ((uint64_t)s[31] << 56) | ((uint64_t)s[30] << 48) |
+                ((uint64_t)s[29] << 40) | ((uint64_t)s[28] << 32) |
+                ((uint64_t)s[27] << 24) | ((uint64_t)s[26] << 16) |
+                ((uint64_t)s[25] << 8)  | ((uint64_t)s[24]);
 
-            if ((key_prefix & target_mask) == target_prefix) {
+            // Range Check
+            if (top64 >= min_limit && top64 <= max_limit) {
                 // Found!
                 uint32_t slot = atomicAdd(&ring->write_head, 1);
                 Candidate c;
@@ -302,7 +304,7 @@ void compute_prefix_target(const char* prefix_str, uint64_t* out_val, uint64_t* 
 // --- Host Logic: Phase 2 ---
 
 // Solve: reconstruct key from Ring Buffer item
-void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check, uint64_t prefix_val, uint64_t mask_val) {
+void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check, const char* prefix_check) {
     // 1. Reconstruct Scalar
     // Old: scalar = tid + (iter_count * stride)
     // New: scalar = random_offset + tid + (iter_count * total_threads)
@@ -330,60 +332,49 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
     unsigned char publick[32];
     ge_p3_tobytes(publick, &A);
 
-    // 2b. Verify Prefix (Host Side Sanity Check)
-    // Must match Kernel's Little Endian logic
-    uint64_t check_prefix =
-        ((uint64_t)publick[0])       | ((uint64_t)publick[1] << 8) |
-        ((uint64_t)publick[2] << 16) | ((uint64_t)publick[3] << 24) |
-        ((uint64_t)publick[4] << 32) | ((uint64_t)publick[5] << 40) |
-        ((uint64_t)publick[6] << 48) | ((uint64_t)publick[7] << 56);
-
-    if ((check_prefix & mask_val) != prefix_val) {
-        printf("[Host] FALSE POSITIVE - IGNORING\n");
-        return;
-    }
-
     // 3. Base58 Encode
     char b58[128];
     size_t b58len = 128;
     b58enc(b58, &b58len, publick, 32);
 
-    // 4. Check Suffix
+    // 4. Exact Verification
+    if (prefix_check && strlen(prefix_check) > 0) {
+        if (strncmp(b58, prefix_check, strlen(prefix_check)) != 0) {
+             printf("[Host] FALSE POSITIVE (Filter) - IGNORING\n");
+             return;
+        }
+    }
+
     if (suffix_check && strlen(suffix_check) > 0) {
         size_t len = strlen(b58);
         size_t slen = strlen(suffix_check);
-        if (len >= slen && strcmp(b58 + len - slen, suffix_check) == 0) {
-             // Found!
-             // Output JSON
-             // Secret Key: The Scalar (32 bytes) + Public Key (32 bytes)
-             printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
-             for(int i=0; i<32; i++) printf("%d, ", scalar[i]);
-             for(int i=0; i<31; i++) printf("%d, ", publick[i]);
-             printf("%d]}\n", publick[31]);
-             fflush(stdout);
+        if (len < slen || strcmp(b58 + len - slen, suffix_check) != 0) {
+             return;
         }
-    } else {
-        // Just print it (Prefix match assumed)
-        printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
-        for(int i=0; i<32; i++) printf("%d, ", scalar[i]);
-        for(int i=0; i<31; i++) printf("%d, ", publick[i]);
-        printf("%d]}\n", publick[31]);
-        fflush(stdout);
     }
+
+    // KEY FOUND
+    printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
+    for(int i=0; i<32; i++) printf("%d, ", scalar[i]);
+    for(int i=0; i<31; i++) printf("%d, ", publick[i]);
+    printf("%d]}\n", publick[31]);
+    fflush(stdout);
 }
 
 int main(int argc, char** argv) {
-    uint64_t prefix_val = 0;
-    uint64_t mask_val = 0;
+    uint64_t min_limit = 0;
+    uint64_t max_limit = 0xFFFFFFFFFFFFFFFF;
     const char* suffix = NULL;
+    const char* prefix_str = NULL;
     int device = 0;
 
     // Parsing
     for(int i=1; i<argc; i++) {
         if (strcmp(argv[i], "--suffix")==0 && i+1<argc) suffix = argv[i+1];
+        if (strcmp(argv[i], "--prefix-str")==0 && i+1<argc) prefix_str = argv[i+1];
         if (strcmp(argv[i], "--device")==0 && i+1<argc) device = atoi(argv[i+1]);
-        if (strcmp(argv[i], "--prefix-val")==0 && i+1<argc) prefix_val = strtoull(argv[i+1], NULL, 16);
-        if (strcmp(argv[i], "--mask-val")==0 && i+1<argc) mask_val = strtoull(argv[i+1], NULL, 16);
+        if (strcmp(argv[i], "--min-limit")==0 && i+1<argc) min_limit = strtoull(argv[i+1], NULL, 10);
+        if (strcmp(argv[i], "--max-limit")==0 && i+1<argc) max_limit = strtoull(argv[i+1], NULL, 10);
         if (strcmp(argv[i], "--gpu-index")==0 && i+1<argc) device = atoi(argv[i+1]);
         if (strcmp(argv[i], "--generate-tables")==0) {
             generate_tables();
@@ -424,7 +415,7 @@ int main(int argc, char** argv) {
 
     printf("VanityForge Iterator (L4 Optimized)\n");
     printf("GPU: %s\n", prop.name);
-    printf("Target Prefix Val: %lx Mask: %lx\n", prefix_val, mask_val);
+    printf("Range: %llu - %llu\n", (unsigned long long)min_limit, (unsigned long long)max_limit);
     printf("Random Offset: %lu\n", random_offset);
 
     // Initial Base P (Identity? Or handled in kernel)
@@ -432,8 +423,8 @@ int main(int argc, char** argv) {
 
     phase1_filter_kernel<<<gridSize, BLOCK_SIZE>>>(
         dummy, // Unused
-        prefix_val,
-        mask_val,
+        min_limit,
+        max_limit,
         random_offset,
         d_ring,
         d_stats
@@ -455,7 +446,7 @@ int main(int argc, char** argv) {
 
         while (local_read_head < write_head) {
             Candidate c = h_ring_mapped->items[local_read_head & RING_BUFFER_MASK];
-            phase2_solve(c.thread_id, c.iter_count, total_threads, random_offset, suffix, prefix_val, mask_val);
+            phase2_solve(c.thread_id, c.iter_count, total_threads, random_offset, suffix, prefix_str);
             local_read_head++;
             if (write_head - local_read_head > RING_BUFFER_SIZE) {
                 local_read_head = write_head;
