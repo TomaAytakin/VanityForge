@@ -405,12 +405,13 @@
         }
         const db = firebase.firestore();
         // CHECK REDIRECT RESULT
-        firebase.auth().getRedirectResult().then((result) => {
+        firebase.auth().getRedirectResult().then(async (result) => {
             if (result.user) {
                 const user = result.user;
+                const token = await user.getIdToken();
                 currentUser = user.uid;
                 currentUserEmail = user.email;
-                checkUserStatus(currentUser);
+                checkUserStatus(currentUser, token);
             }
         }).catch((error) => {
             console.error("Redirect Login Error:", error);
@@ -731,10 +732,11 @@
             try {
                 const result = await firebase.auth().signInWithPopup(provider);
                 const user = result.user;
+                const token = await user.getIdToken();
                 currentUser = user.uid;
                 window.walletAddress = user.uid; // Satisfy guard check
                 currentUserEmail = user.email;
-                await checkUserStatus(currentUser);
+                await checkUserStatus(currentUser, token);
             } catch (error) {
                 console.error("Popup error:", error);
                 alert("Google Login Failed: " + error.message);
@@ -797,13 +799,19 @@
             }
         });
 
-        async function checkUserStatus(userId) {
+        async function checkUserStatus(userId, idToken = null) {
             if (!userId) return;
             try {
+                const body = { user_id: userId };
+                if (idToken) body.id_token = idToken;
+
+                // Fallback to email if no token (legacy/unsafe but kept for compat)
+                if (currentUserEmail) body.email = currentUserEmail;
+
                 const res = await fetch('/check-user', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ user_id: userId })
+                    body: JSON.stringify(body)
                 });
                 const data = await res.json();
                 userTrialsUsed = data.trials_used || 0;

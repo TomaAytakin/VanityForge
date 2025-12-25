@@ -65,22 +65,50 @@ function initLiveActivityCounter() {
 }
 
 // --- GOD MODE / ADMIN DASHBOARD LOGIC ---
-function checkAdmin() {
-    // 1. Check for the weak cookie flag
-    const isAdmin = document.cookie.split(';').some((item) => item.trim().startsWith('is_admin_flag=1'));
+async function checkAdmin() {
+    try {
+        const res = await fetch('/api/user-status');
+        const data = await res.json();
 
-    if (isAdmin) {
-        // 2. Inject Navbar Item
-        const navContainer = document.querySelector('nav .md\\:block .ml-10');
-        if (navContainer) {
-            const devBtn = document.createElement('a');
-            devBtn.href = "#";
-            devBtn.id = "nav-dev";
-            devBtn.onclick = (e) => { e.preventDefault(); openAdminDashboard(); };
-            devBtn.className = "text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-3 py-2 rounded-md text-sm font-bold transition-colors animate-pulse";
-            devBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> DEV';
-            navContainer.appendChild(devBtn);
+        if (data.isAdmin) {
+            // 2. Inject Navbar Item
+            const navContainer = document.querySelector('nav .md\\:block .ml-10');
+            if (navContainer && !document.getElementById('nav-dev')) {
+                const devBtn = document.createElement('a');
+                devBtn.href = "#";
+                devBtn.id = "nav-dev";
+                devBtn.onclick = (e) => { e.preventDefault(); toggleAdminDashboard(); };
+                devBtn.className = "text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-3 py-2 rounded-md text-sm font-bold transition-colors animate-pulse";
+                devBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> DEV';
+                navContainer.appendChild(devBtn);
+            }
+
+            // Bind to "GOD MODE ACTIVE" text if present (for mobile/alternate access)
+            setTimeout(() => {
+                const spans = document.getElementsByTagName('span');
+                for (let span of spans) {
+                    if (span.innerText.includes('God Mode Active')) {
+                        span.style.cursor = 'pointer';
+                        span.onclick = toggleAdminDashboard;
+                    }
+                }
+            }, 2000); // Wait for UI to settle
         }
+    } catch (e) {
+        console.error("Admin check failed", e);
+    }
+}
+
+function toggleAdminDashboard() {
+    const dash = document.getElementById('admin-dashboard');
+    if (dash && !dash.classList.contains('hidden')) {
+        // Close it
+        dash.classList.add('hidden');
+        document.getElementById('app-interface').classList.remove('hidden'); // Ensure app is visible
+        document.getElementById('job-queue-section').classList.remove('hidden');
+        document.getElementById('forge-section').classList.remove('hidden');
+    } else {
+        openAdminDashboard();
     }
 }
 
