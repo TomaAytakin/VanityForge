@@ -26,6 +26,10 @@ def generate_key_from_pin(pin, user_id):
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
 def run_gpu_grinder(prefix, suffix):
+    """
+    Returns: (address, secret, fatal_error)
+    fatal_error is True if we should NOT retry (e.g. Invariant Failure)
+    """
     cmd = ["./solanity"]
     if prefix:
         cmd.extend(["--prefix", prefix])
@@ -49,48 +53,53 @@ def run_gpu_grinder(prefix, suffix):
                 continue
 
             try:
-                if '"public_key":' in line_str:
+                # Look for the new JSON format
+                # {"found": true, "seed": "...", "public_key": "..."}
+                if '"found": true' in line_str and '"seed":' in line_str:
                     data = json.loads(line_str)
-                    if "public_key" in data:
+                    if "public_key" in data and "seed" in data:
                         logging.info(f"⛏️ GRINDER: KEY FOUND!")
 
                         address = data.get("public_key")
-                        secret_ints = data.get("secret_key")
+                        seed_b58 = data.get("seed")
 
-                        if secret_ints and len(secret_ints) == 64:
-                            secret_bytes = bytes(secret_ints)
-                            seed = secret_bytes[:32]
-                            provided_pub_bytes = secret_bytes[32:]
+                        try:
+                            seed_bytes = base58.b58decode(seed_b58)
+                            if len(seed_bytes) != 32:
+                                logging.error(f"Invalid seed length: {len(seed_bytes)}")
+                                continue
+
+                            provided_pub_b58 = address
 
                             # CRITICAL: Verify Ed25519 Invariant
-                            try:
-                                priv_key = ed25519.Ed25519PrivateKey.from_private_bytes(seed)
-                                derived_pub_bytes = priv_key.public_key().public_bytes(
-                                    encoding=serialization.Encoding.Raw,
-                                    format=serialization.PublicFormat.Raw
-                                )
+                            priv_key = ed25519.Ed25519PrivateKey.from_private_bytes(seed_bytes)
+                            derived_pub_bytes = priv_key.public_key().public_bytes(
+                                encoding=serialization.Encoding.Raw,
+                                format=serialization.PublicFormat.Raw
+                            )
+                            derived_pub_b58 = base58.b58encode(derived_pub_bytes).decode('ascii')
 
-                                if derived_pub_bytes != provided_pub_bytes:
-                                    logging.error("CRITICAL: Generated key FAILS Ed25519 invariant! Discarding.")
-                                    # We do NOT terminate process here if we want to keep searching,
-                                    # but the GPU binary usually exits on find.
-                                    # If the GPU binary exited, we are out of luck for this run.
-                                    # We should treat this as a failure and let the loop handle it?
-                                    # But wait, run_gpu_grinder is called once.
-                                    # If we terminate, we return None.
-                                    process.terminate()
-                                    return None, None
+                            if derived_pub_b58 != provided_pub_b58:
+                                logging.error("CRITICAL: Generated key FAILS Ed25519 invariant! Discarding.")
+                                logging.error(f"Provided Pub: {provided_pub_b58}")
+                                logging.error(f"Derived Pub:  {derived_pub_b58}")
 
-                            except Exception as inv_err:
-                                logging.error(f"Invariant check raised exception: {inv_err}")
+                                # FAIL FAST - DO NOT RETRY
                                 process.terminate()
-                                return None, None
+                                return None, None, True
+
+                            # Construct Phantom-compatible secret key
+                            # secret_key = seed + public_key # 64 bytes
+                            secret_key_bytes = seed_bytes + derived_pub_bytes
+                            secret_b58 = base58.b58encode(secret_key_bytes).decode('ascii')
 
                             process.terminate()
-                            secret_b58 = base58.b58encode(secret_bytes).decode('ascii')
-                            return address, secret_b58
-                        else:
-                            logging.error("Invalid secret key length.")
+                            return address, secret_b58, False
+
+                        except Exception as inv_err:
+                            logging.error(f"Invariant check raised exception: {inv_err}")
+                            process.terminate()
+                            return None, None, True # Treat exception in invariant check as fatal to be safe
 
             except json.JSONDecodeError:
                 pass
@@ -106,11 +115,11 @@ def run_gpu_grinder(prefix, suffix):
             logging.error(f"Binary Error: Return Code {process.returncode}")
 
         logging.error("Binary finished but no JSON output found.")
-        return None, None
+        return None, None, False # Retry if just failed to find
 
     except Exception as e:
         logging.exception(f"Unexpected error in run_gpu_grinder: {e}")
-        return None, None
+        return None, None, False
 
 if __name__ == "__main__":
     print("🩺 DIAGNOSTIC: Checking GPU Health...")
@@ -148,10 +157,15 @@ if __name__ == "__main__":
         secret = None
 
         for i in range(MAX_RETRIES):
-            address, secret = run_gpu_grinder(TASK_PREFIX, TASK_SUFFIX)
+            address, secret, fatal = run_gpu_grinder(TASK_PREFIX, TASK_SUFFIX)
             if address and secret:
                 break
-            logging.warning(f"Grinding attempt {i+1}/{MAX_RETRIES} failed or produced invalid key. Retrying...")
+
+            if fatal:
+                logging.error("Fatal error encountered (Invariant Failure). Aborting retries.")
+                break
+
+            logging.warning(f"Grinding attempt {i+1}/{MAX_RETRIES} failed. Retrying...")
             time.sleep(1)
 
         if address and secret:
@@ -189,7 +203,6 @@ if __name__ == "__main__":
 
         else:
             logging.error("Failed to generate address after retries.")
-            # Report failure to server
             try:
                 requests.post(f"{SERVER_URL}/api/worker/complete", json={
                     'job_id': TASK_JOB_ID,

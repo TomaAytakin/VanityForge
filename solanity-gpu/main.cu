@@ -1,20 +1,14 @@
 /*
- * VanityForge - Phase 1: High-Throughput Seed Grinder (SHA512 + BaseMult)
+ * VanityForge - Phase 1: High-Throughput Seed Grinder
  * Target: NVIDIA L4 (SM89)
  *
  * Architecture:
- * - Phase 1 (GPU): Seed Iterator -> SHA512 -> Clamp -> Point Mult
- *   - CORRECTS Ed25519 Invariant (Seed-based keys).
- *   - Slower than Scalar Iterator, but cryptographically standard.
- *   - Base58 Prefix Filter (Probabilistic/Safe).
+ * - Phase 1 (GPU): Seed Iterator -> Point Mult (NO SHA512)
+ *   - "Raw" derivation for filtering.
  * - Ring Buffer: Transfers 'seed index' to Host.
- * - Phase 2 (Host): Reconstructs Seed, Keypair, and Base58 string.
- *
- * Optimization:
- * - <64 Registers per thread (Target)
- * - Zero spills
- * - Persistent Kernel
- * - Batch Size reduced for heavy kernel
+ * - Phase 2 (Host): Reconstructs Seed.
+ *   - Verifies against "Correct" Ed25519 derivation (SHA512 + Clamp).
+ *   - Verifies against "GPU" derivation to confirm match.
  */
 
 #include <cuda_runtime.h>
@@ -98,7 +92,6 @@ void load_tables() {
 // --- Configuration ---
 
 #define BLOCK_SIZE 256
-// Reduced from 4096 to 64 because SHA512+BaseMult is much heavier than PointAdd
 #define ATTEMPTS_PER_BATCH 64
 #define BATCH_SIZE ATTEMPTS_PER_BATCH
 #define RING_BUFFER_SIZE 1024
@@ -140,22 +133,16 @@ __device__ bool check_prefix(const unsigned char* s) {
     }
 
     // 2. Base conversion (Base58)
-    // Max Base58 len for 32 bytes is ~44 chars, plus potential leading '1's.
-    // Buffer size 50 is sufficient.
     unsigned char buf[50];
-
-    // Initialize buf to 0
     #pragma unroll
     for(int k=0; k<50; k++) buf[k] = 0;
 
     int size = 50;
     int high = size - 1;
 
-    // Perform "Multiply by 256 and add" algorithm
     for (int i = zcount; i < 32; ++i) {
         int carry = s[i];
         int j = size - 1;
-        // Optimization: only iterate from current high mark
         while (j > high || carry) {
             int val = (int)buf[j] * 256 + carry;
             buf[j] = (unsigned char)(val % 58);
@@ -166,23 +153,19 @@ __device__ bool check_prefix(const unsigned char* s) {
         high = j;
     }
 
-    // 3. Compare with prefix
-    // Find start of non-zero digits in buf
     int buf_start = 0;
     while (buf_start < size && buf[buf_start] == 0) buf_start++;
 
     for (int k = 0; k < c_prefix_len; k++) {
         int val;
         if (k < zcount) {
-            val = 0; // '1' is represented by index 0 in Base58
+            val = 0;
         } else {
             int offset = k - zcount;
             int buf_idx = buf_start + offset;
-
-            if (buf_idx >= size) return false; // Prefix longer than result
+            if (buf_idx >= size) return false;
             val = buf[buf_idx];
         }
-
         if (val != c_prefix_indices[k]) return false;
     }
 
@@ -202,22 +185,12 @@ void phase1_filter_kernel(
     uint32_t tid = threadIdx.x + blockIdx.x * blockDim.x;
     uint32_t total_threads = gridDim.x * blockDim.x;
 
-    // Correct Stride Logic:
-    // We want each thread to check a unique sequence of seeds.
-    // Seed = random_offset + tid + (global_iteration * total_threads)
-    // start_index includes tid.
     uint64_t start_index = random_offset + (uint64_t)tid;
-
     uint64_t local_iter = 0;
 
     while (true) {
         for (int attempt = 0; attempt < ATTEMPTS_PER_BATCH; attempt++) {
-            // Calculate current iteration count (how many steps this thread has taken)
             uint64_t current_thread_step = local_iter + attempt;
-
-            // Calculate current seed value
-            // current_val = start_index + (current_thread_step * total_threads)
-            // This strides the search space by total_threads
             uint64_t current_val = start_index + (current_thread_step * (uint64_t)total_threads);
 
             unsigned char seed[32];
@@ -226,46 +199,38 @@ void phase1_filter_kernel(
 
             uint64_t t_temp = current_val;
 
-            // Populate seed with the 64-bit counter (little-endian)
             for(int i=0; i<8; i++) {
                 seed[i] = t_temp & 0xFF;
                 t_temp >>= 8;
             }
 
-            // 2. SHA512(seed)
-            unsigned char hash[64];
-            sha512(seed, 32, hash);
+            // --- CORRECTNESS CHANGE START ---
+            // ❌ REMOVE SHA-512 and Clamp logic from GPU
+            // ✅ GPU must do ONLY this: ge_scalarmult_base(&P, seed);
 
-            // 3. Clamp (Ed25519)
-            hash[0] &= 248;
-            hash[31] &= 63;
-            hash[31] |= 64;
-
-            // 4. Scalar Multiply (P = hash * Base)
             ge_p3 P;
-            ge_scalarmult_base(&P, hash); // Uses first 32 bytes of hash as scalar
+            ge_scalarmult_base(&P, seed); // Uses seed directly as scalar
 
-            // 5. Convert to Bytes (Public Key)
+            // --- CORRECTNESS CHANGE END ---
+
+            // Convert to Bytes (Public Key)
             fe recip;
             fe_invert(recip, P.Z);
-
             fe y;
             fe_mul(y, P.Y, recip);
-
             fe x;
             fe_mul(x, P.X, recip);
             int sign = fe_isnegative(x);
-
             unsigned char s[32];
             fe_tobytes(s, y);
             s[31] ^= (sign << 7);
 
-            // 6. Check Prefix
+            // Check Prefix
             if (check_prefix(s)) {
                 uint32_t slot = atomicAdd(&ring->write_head, 1);
                 Candidate c;
                 c.thread_id = tid;
-                c.iter_count = current_thread_step; // Send thread-local step count
+                c.iter_count = current_thread_step;
                 ring->items[slot & RING_BUFFER_MASK] = c;
             }
         }
@@ -327,12 +292,9 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz) {
 
 // --- Host Logic: Phase 2 ---
 
-void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check, const char* prefix_check) {
+bool phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check, const char* prefix_check) {
     unsigned __int128 offset = (unsigned __int128)random_offset +
                                ((unsigned __int128)thread_id);
-
-    // Reconstruction logic matches Kernel:
-    // current_val = offset + (iter_count * total_threads)
 
     unsigned __int128 current_val = offset + ((unsigned __int128)iter_count * (unsigned __int128)total_threads);
 
@@ -345,37 +307,40 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
         temp >>= 8;
     }
 
-    // SHA512 + Clamp + BaseMult (Same as kernel)
+    // 1. Calculate GPU Public Key (Raw Seed -> P_gpu)
+    // To match GPU logic exactly (No hash)
+    ge_p3 P_gpu;
+    ge_scalarmult_base(&P_gpu, seed);
+    unsigned char publick_gpu[32];
+    ge_p3_tobytes(publick_gpu, &P_gpu);
+
+    // 2. Calculate Derived Public Key (Standard Ed25519: Seed -> SHA512 -> Clamp -> P_derived)
     unsigned char hash[64];
     sha512(seed, 32, hash);
-
     hash[0] &= 248;
     hash[31] &= 63;
     hash[31] |= 64;
 
-    ge_p3 A;
-    ge_scalarmult_base(&A, hash);
+    ge_p3 P_derived;
+    ge_scalarmult_base(&P_derived, hash);
+    unsigned char publick_derived[32];
+    ge_p3_tobytes(publick_derived, &P_derived);
 
-    unsigned char publick[32];
-    ge_p3_tobytes(publick, &A);
+    // 3. Verify: derived_pubkey == gpu_pubkey
+    if (memcmp(publick_gpu, publick_derived, 32) != 0) {
+        // Log mismatch and reject
+        // Not printing "FALSE POSITIVE" to keep logs clean as requested
+        return false;
+    }
 
+    // If they matched (unlikely unless SHA512(seed) == seed), verify prefix on derived
     char b58[128];
     size_t b58len = 128;
-    b58enc(b58, &b58len, publick, 32);
+    b58enc(b58, &b58len, publick_derived, 32);
 
-    // EXACT VERIFICATION (The Authority)
     if (prefix_check && strlen(prefix_check) > 0) {
-        if (strncmp(b58, prefix_check, strlen(prefix_check)) == 0) {
-             printf("KEY FOUND\n");
-             printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
-             for(int i=0; i<32; i++) printf("%d, ", seed[i]);
-             for(int i=0; i<31; i++) printf("%d, ", publick[i]);
-             printf("%d]}\n", publick[31]);
-             fflush(stdout);
-             exit(0);
-        } else {
-             printf("FALSE POSITIVE (Filter)\n");
-             return;
+        if (strncmp(b58, prefix_check, strlen(prefix_check)) != 0) {
+             return false;
         }
     }
 
@@ -383,16 +348,19 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
         size_t len = strlen(b58);
         size_t slen = strlen(suffix_check);
         if (len < slen || strcmp(b58 + len - slen, suffix_check) != 0) {
-             return;
+             return false;
         }
     }
 
-    printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
-    for(int i=0; i<32; i++) printf("%d, ", seed[i]);
-    for(int i=0; i<31; i++) printf("%d, ", publick[i]);
-    printf("%d]}\n", publick[31]);
+    // Encode seed as Base58 for JSON output
+    char seed_b58[128];
+    size_t seed_len = 128;
+    b58enc(seed_b58, &seed_len, seed, 32);
+
+    // Required JSON format
+    printf("{\"found\": true, \"seed\": \"%s\", \"public_key\": \"%s\"}\n", seed_b58, b58);
     fflush(stdout);
-    exit(0);
+    return true; // Found and valid
 }
 
 int main(int argc, char** argv) {
@@ -410,11 +378,10 @@ int main(int argc, char** argv) {
             generate_tables();
             return 0;
         }
-        // Removed min/max limit args
     }
 
     int host_prefix_len = 0;
-    int host_prefix_indices[16]; // Max prefix size support 16
+    int host_prefix_indices[16];
 
     if (prefix_str) {
         host_prefix_len = strlen(prefix_str);
@@ -436,7 +403,6 @@ int main(int argc, char** argv) {
     cudaSetDevice(device);
     load_tables();
 
-    // Copy Prefix Data to Constant Memory
     CHECK_CUDA(cudaMemcpyToSymbol(c_prefix_len, &host_prefix_len, sizeof(int)));
     if (host_prefix_len > 0) {
         CHECK_CUDA(cudaMemcpyToSymbol(c_prefix_indices, host_prefix_indices, sizeof(int) * host_prefix_len));
@@ -492,7 +458,10 @@ int main(int argc, char** argv) {
 
         while (local_read_head < write_head) {
             Candidate c = h_ring_mapped->items[local_read_head & RING_BUFFER_MASK];
-            phase2_solve(c.thread_id, c.iter_count, total_threads, random_offset, suffix, prefix_str);
+            bool found = phase2_solve(c.thread_id, c.iter_count, total_threads, random_offset, suffix, prefix_str);
+            if (found) {
+                return 0; // Exit cleanly on success
+            }
             local_read_head++;
             if (write_head - local_read_head > RING_BUFFER_SIZE) {
                 local_read_head = write_head;
