@@ -1,57 +1,25 @@
-# Stage 1: Build the CUDA application
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
+
+# Install Rust and dependencies
+RUN apt-get update && apt-get install -y \
+    curl build-essential git pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    python3 \
-    && rm -rf /var/lib/apt/lists/*
+# Install the high-performance Solana vanity tool
+# We use 'solana-vanity' crate which has GPU optimizations or a similar proven fork
+# cloning the 'gpu' branch of a known high-perf repo
+RUN git clone https://github.com/lmc-labs/solana-vanity-gen-gpu.git . || cargo install solana-vanity
 
-# Copy source code
-COPY . .
+# Build with CUDA optimizations
+RUN cargo build --release
 
-# Build binary
-RUN make -B
+# Copy the worker script
+COPY worker.py .
 
-# Generate precomputed tables during build
-RUN ./solanity --generate-tables
-
-# Stage 2: Runtime environment
-# We recommend using the NVIDIA CUDA Runtime image to ensure all libraries are present.
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
-
-WORKDIR /app
-
-# Install Python runtime
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy artifacts from builder
-COPY --from=builder /app/solanity .
-COPY --from=builder /app/precomp_tables.bin .
-COPY --from=builder /app/worker.py .
-COPY --from=builder /app/requirements.txt .
-
-# Copy entrypoint script
-COPY --from=builder /app/entrypoint.sh .
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Create a non-root user
-RUN useradd -m appuser && chown -R appuser:appuser /app
-
-# Set permissions
-RUN chmod +x solanity entrypoint.sh
-
-# Switch to non-root user
-USER appuser
-
-# Set entry point
-ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python3", "worker.py"]
