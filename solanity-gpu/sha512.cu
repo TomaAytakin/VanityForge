@@ -176,7 +176,7 @@ int __forceinline__ __device__ __host__ sha512_init(sha512_context * md) {
    @param inlen  The length of the data (octets)
    @return 0 if successful
 */
-int sha512_update(sha512_context * md, const unsigned char *in, size_t inlen)
+int __device__ __host__ sha512_update(sha512_context * md, const unsigned char *in, size_t inlen)
 {
     size_t n;
     size_t i;
@@ -223,7 +223,7 @@ int sha512_update(sha512_context * md, const unsigned char *in, size_t inlen)
    @param out [out] The destination of the hash (64 bytes)
    @return 0 if successful
 */
-int sha512_final(sha512_context * md, unsigned char *out)
+int __device__ __host__ sha512_final(sha512_context * md, unsigned char *out)
 {
     int i;
 
@@ -272,7 +272,7 @@ int sha512_final(sha512_context * md, unsigned char *out)
     return 0;
 }
 
-int sha512(const unsigned char *message, size_t message_len, unsigned char *out)
+int __device__ __host__ sha512(const unsigned char *message, size_t message_len, unsigned char *out)
 {
     sha512_context ctx;
     int ret;

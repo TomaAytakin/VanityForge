@@ -1,20 +1,20 @@
 /*
- * VanityForge - Phase 1: High-Throughput Iterator (Scalar+Point Add)
+ * VanityForge - Phase 1: High-Throughput Seed Grinder (SHA512 + BaseMult)
  * Target: NVIDIA L4 (SM89)
  *
  * Architecture:
- * - Phase 1 (GPU): Scalar Iterator + Point Addition (P' = P + B)
- *   - Avoids SHA-512 in hot loop.
- *   - Uses Fe/Ge optimized for registers.
+ * - Phase 1 (GPU): Seed Iterator -> SHA512 -> Clamp -> Point Mult
+ *   - CORRECTS Ed25519 Invariant (Seed-based keys).
+ *   - Slower than Scalar Iterator, but cryptographically standard.
  *   - Base58 Prefix Filter (Probabilistic/Safe).
- * - Ring Buffer: Transfers 'scalar index' to Host.
- * - Phase 2 (Host): Reconstructs Scalar, Point, and Base58 string.
+ * - Ring Buffer: Transfers 'seed index' to Host.
+ * - Phase 2 (Host): Reconstructs Seed, Keypair, and Base58 string.
  *
  * Optimization:
  * - <64 Registers per thread (Target)
  * - Zero spills
  * - Persistent Kernel
- * - Batch Size tunable
+ * - Batch Size reduced for heavy kernel
  */
 
 #include <cuda_runtime.h>
@@ -98,7 +98,8 @@ void load_tables() {
 // --- Configuration ---
 
 #define BLOCK_SIZE 256
-#define ATTEMPTS_PER_BATCH 4096
+// Reduced from 4096 to 64 because SHA512+BaseMult is much heavier than PointAdd
+#define ATTEMPTS_PER_BATCH 64
 #define BATCH_SIZE ATTEMPTS_PER_BATCH
 #define RING_BUFFER_SIZE 1024
 #define RING_BUFFER_MASK (RING_BUFFER_SIZE - 1)
@@ -201,49 +202,56 @@ void phase1_filter_kernel(
     uint32_t tid = threadIdx.x + blockIdx.x * blockDim.x;
     uint32_t total_threads = gridDim.x * blockDim.x;
 
-    ge_p3 P;
-    ge_p3_0(&P);
-
+    // Correct Stride Logic:
+    // We want each thread to check a unique sequence of seeds.
+    // Seed = random_offset + tid + (global_iteration * total_threads)
+    // start_index includes tid.
     uint64_t start_index = random_offset + (uint64_t)tid;
-    unsigned char init_scalar[32];
-    #pragma unroll
-    for(int i=0; i<32; i++) init_scalar[i] = 0;
-
-    uint64_t t_temp = start_index;
-    for(int i=0; i<8; i++) {
-        init_scalar[i] = t_temp & 0xFF;
-        t_temp >>= 8;
-    }
-
-    ge_scalarmult_base(&P, init_scalar);
-
-    ge_p3 P_step;
-    unsigned char step_scalar[32];
-    #pragma unroll
-    for(int i=0; i<32; i++) step_scalar[i] = 0;
-
-    t_temp = total_threads;
-    for(int i=0; i<8; i++) {
-        step_scalar[i] = t_temp & 0xFF;
-        t_temp >>= 8;
-    }
-    ge_scalarmult_base(&P_step, step_scalar);
-
-    ge_cached P_step_cached;
-    ge_p3_to_cached(&P_step_cached, &P_step);
 
     uint64_t local_iter = 0;
 
     while (true) {
         for (int attempt = 0; attempt < ATTEMPTS_PER_BATCH; attempt++) {
-            // 1. Invert Z to get Affine Y
+            // Calculate current iteration count (how many steps this thread has taken)
+            uint64_t current_thread_step = local_iter + attempt;
+
+            // Calculate current seed value
+            // current_val = start_index + (current_thread_step * total_threads)
+            // This strides the search space by total_threads
+            uint64_t current_val = start_index + (current_thread_step * (uint64_t)total_threads);
+
+            unsigned char seed[32];
+            #pragma unroll
+            for(int i=0; i<32; i++) seed[i] = 0;
+
+            uint64_t t_temp = current_val;
+
+            // Populate seed with the 64-bit counter (little-endian)
+            for(int i=0; i<8; i++) {
+                seed[i] = t_temp & 0xFF;
+                t_temp >>= 8;
+            }
+
+            // 2. SHA512(seed)
+            unsigned char hash[64];
+            sha512(seed, 32, hash);
+
+            // 3. Clamp (Ed25519)
+            hash[0] &= 248;
+            hash[31] &= 63;
+            hash[31] |= 64;
+
+            // 4. Scalar Multiply (P = hash * Base)
+            ge_p3 P;
+            ge_scalarmult_base(&P, hash); // Uses first 32 bytes of hash as scalar
+
+            // 5. Convert to Bytes (Public Key)
             fe recip;
             fe_invert(recip, P.Z);
 
             fe y;
             fe_mul(y, P.Y, recip);
 
-            // Need X sign for full public key
             fe x;
             fe_mul(x, P.X, recip);
             int sign = fe_isnegative(x);
@@ -252,19 +260,14 @@ void phase1_filter_kernel(
             fe_tobytes(s, y);
             s[31] ^= (sign << 7);
 
-            // 2. Probabilistic Base58 Filter (Option B)
+            // 6. Check Prefix
             if (check_prefix(s)) {
                 uint32_t slot = atomicAdd(&ring->write_head, 1);
                 Candidate c;
                 c.thread_id = tid;
-                c.iter_count = local_iter + attempt;
+                c.iter_count = current_thread_step; // Send thread-local step count
                 ring->items[slot & RING_BUFFER_MASK] = c;
             }
-
-            // 3. Step
-            ge_p1p1 next_P;
-            ge_add(&next_P, &P, &P_step_cached);
-            ge_p1p1_to_p3(&P, &next_P);
         }
 
         local_iter += ATTEMPTS_PER_BATCH;
@@ -326,20 +329,32 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz) {
 
 void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check, const char* prefix_check) {
     unsigned __int128 offset = (unsigned __int128)random_offset +
-                               ((unsigned __int128)thread_id) +
-                               ((unsigned __int128)iter_count * total_threads);
+                               ((unsigned __int128)thread_id);
 
-    unsigned char scalar[32];
-    memset(scalar, 0, 32);
+    // Reconstruction logic matches Kernel:
+    // current_val = offset + (iter_count * total_threads)
 
-    unsigned __int128 temp = offset;
-    for(int i=0; i<16; i++) {
-        scalar[i] = (unsigned char)(temp & 0xFF);
+    unsigned __int128 current_val = offset + ((unsigned __int128)iter_count * (unsigned __int128)total_threads);
+
+    unsigned char seed[32];
+    memset(seed, 0, 32);
+
+    unsigned __int128 temp = current_val;
+    for(int i=0; i<8; i++) {
+        seed[i] = (unsigned char)(temp & 0xFF);
         temp >>= 8;
     }
 
+    // SHA512 + Clamp + BaseMult (Same as kernel)
+    unsigned char hash[64];
+    sha512(seed, 32, hash);
+
+    hash[0] &= 248;
+    hash[31] &= 63;
+    hash[31] |= 64;
+
     ge_p3 A;
-    ge_scalarmult_base(&A, scalar);
+    ge_scalarmult_base(&A, hash);
 
     unsigned char publick[32];
     ge_p3_tobytes(publick, &A);
@@ -353,7 +368,7 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
         if (strncmp(b58, prefix_check, strlen(prefix_check)) == 0) {
              printf("KEY FOUND\n");
              printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
-             for(int i=0; i<32; i++) printf("%d, ", scalar[i]);
+             for(int i=0; i<32; i++) printf("%d, ", seed[i]);
              for(int i=0; i<31; i++) printf("%d, ", publick[i]);
              printf("%d]}\n", publick[31]);
              fflush(stdout);
@@ -373,7 +388,7 @@ void phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
     }
 
     printf("{\"found\": true, \"public_key\": \"%s\", \"secret_key\": [", b58);
-    for(int i=0; i<32; i++) printf("%d, ", scalar[i]);
+    for(int i=0; i<32; i++) printf("%d, ", seed[i]);
     for(int i=0; i<31; i++) printf("%d, ", publick[i]);
     printf("%d]}\n", publick[31]);
     fflush(stdout);
