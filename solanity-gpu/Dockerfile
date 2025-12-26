@@ -1,8 +1,12 @@
 FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
 
-# Install system dependencies
+# Prevent "Select Timezone" prompt hanging the build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies, Python, AND Pip (safety net)
 RUN apt-get update && apt-get install -y \
     curl build-essential git pkg-config libssl-dev \
+    python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
@@ -11,14 +15,13 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
-# Install the tool directly.
-# It will be compiled and placed in /root/.cargo/bin/solana-vanity
+# Install the engine (Pre-compiled)
 RUN cargo install solana-vanity
 
-# We do NOT need 'cargo build --release' because 'install' already did it.
-
-# Copy the worker script
+# Copy the worker
 COPY worker.py .
 
-# IMPORTANT: The binary is named 'solana-vanity', not 'vanity'
+# Install common libs just in case worker.py needs them (optional but safe)
+RUN pip3 install requests cryptography base58 || true
+
 CMD ["python3", "worker.py"]
