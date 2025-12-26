@@ -307,14 +307,7 @@ bool phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
         temp >>= 8;
     }
 
-    // 1. Calculate GPU Public Key (Raw Seed -> P_gpu)
-    // To match GPU logic exactly (No hash)
-    ge_p3 P_gpu;
-    ge_scalarmult_base(&P_gpu, seed);
-    unsigned char publick_gpu[32];
-    ge_p3_tobytes(publick_gpu, &P_gpu);
-
-    // 2. Calculate Derived Public Key (Standard Ed25519: Seed -> SHA512 -> Clamp -> P_derived)
+    // 1. Calculate Derived Public Key (Standard Ed25519: Seed -> SHA512 -> Clamp -> P_derived)
     unsigned char hash[64];
     sha512(seed, 32, hash);
     hash[0] &= 248;
@@ -326,14 +319,7 @@ bool phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
     unsigned char publick_derived[32];
     ge_p3_tobytes(publick_derived, &P_derived);
 
-    // 3. Verify: derived_pubkey == gpu_pubkey
-    if (memcmp(publick_gpu, publick_derived, 32) != 0) {
-        // Log mismatch and reject
-        // Not printing "FALSE POSITIVE" to keep logs clean as requested
-        return false;
-    }
-
-    // If they matched (unlikely unless SHA512(seed) == seed), verify prefix on derived
+    // Verify prefix on derived (Source of Truth)
     char b58[128];
     size_t b58len = 128;
     b58enc(b58, &b58len, publick_derived, 32);
