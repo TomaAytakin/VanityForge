@@ -87,9 +87,9 @@ void load_tables() {
         exit(1);
     }
 
-    CHECK_CUDA(cudaMemcpyToSymbol(c_base, host_base, sizeof(ge_precomp) * 32 * 8));
+    CHECK_CUDA(cudaMemcpyToSymbol(d_base, host_base, sizeof(ge_precomp) * 32 * 8));
     free(host_base);
-    printf("Precomputed tables loaded to Constant Memory.\n");
+    printf("Precomputed tables loaded to Global Device Memory.\n");
 }
 
 // --- Configuration ---
@@ -234,6 +234,13 @@ void phase1_filter_kernel(
             unsigned char s[32];
             fe_tobytes(s, y);
             s[31] ^= (sign << 7);
+
+            // DEBUG: Print the first key from the first thread to verify tables are loaded
+            if (tid == 0 && attempt == 0 && local_iter == 0) {
+                printf("[DEBUG] GPU GENERATED KEY: ");
+                for(int k=0; k<32; k++) printf("%02x", s[k]);
+                printf("\n");
+            }
 
             // 6. Check Prefix
             if (check_prefix(s)) {
