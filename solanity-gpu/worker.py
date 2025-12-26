@@ -30,13 +30,24 @@ def run_gpu_grinder(prefix, suffix):
     Returns: (address, secret, fatal_error)
     fatal_error is True if we should NOT retry (e.g. Invariant Failure)
     """
-    cmd = ["./solanity"]
-    if prefix:
-        cmd.extend(["--prefix", prefix])
-    if suffix:
-        cmd.extend(["--suffix", suffix])
+    # New Rust binary path
+    binary_path = "./target/release/solana-vanity-gen-gpu"
 
-    logging.info(f"Starting GPU grinder with command: {' '.join(cmd)}")
+    # Fallback if binary is not found (for local testing or if name differs)
+    if not os.path.exists(binary_path):
+        # Try finding it in current dir or basic target/release
+        if os.path.exists("./solana-vanity-gen-gpu"):
+            binary_path = "./solana-vanity-gen-gpu"
+
+    cmd = [binary_path]
+    cmd.append("--gpu")
+
+    if prefix:
+        cmd.extend(["--starts-with", prefix])
+    if suffix:
+        cmd.extend(["--ends-with", suffix])
+
+    logging.info(f"Starting Rust GPU grinder with command: {' '.join(cmd)}")
 
     try:
         process = subprocess.Popen(
@@ -47,75 +58,104 @@ def run_gpu_grinder(prefix, suffix):
             bufsize=1
         )
 
+        found_address = None
+        found_secret_str = None
+
         for line in process.stdout:
             line_str = line.strip()
             if not line_str:
                 continue
 
-            try:
-                # Look for the new JSON format
-                # {"found": true, "seed": "...", "public_key": "..."}
-                if '"found": true' in line_str and '"seed":' in line_str:
-                    data = json.loads(line_str)
-                    if "public_key" in data and "seed" in data:
-                        logging.info(f"⛏️ GRINDER: KEY FOUND!")
-
-                        address = data.get("public_key")
-                        seed_b58 = data.get("seed")
-
-                        try:
-                            seed_bytes = base58.b58decode(seed_b58)
-                            if len(seed_bytes) != 32:
-                                logging.error(f"Invalid seed length: {len(seed_bytes)}")
-                                continue
-
-                            provided_pub_b58 = address
-
-                            # CRITICAL: Verify Ed25519 Invariant
-                            priv_key = ed25519.Ed25519PrivateKey.from_private_bytes(seed_bytes)
-                            derived_pub_bytes = priv_key.public_key().public_bytes(
-                                encoding=serialization.Encoding.Raw,
-                                format=serialization.PublicFormat.Raw
-                            )
-                            derived_pub_b58 = base58.b58encode(derived_pub_bytes).decode('ascii')
-
-                            if derived_pub_b58 != provided_pub_b58:
-                                logging.error("CRITICAL: Generated key FAILS Ed25519 invariant! Discarding.")
-                                logging.error(f"Provided Pub: {provided_pub_b58}")
-                                logging.error(f"Derived Pub:  {derived_pub_b58}")
-
-                                # FAIL FAST - DO NOT RETRY
-                                process.terminate()
-                                return None, None, True
-
-                            # Construct Phantom-compatible secret key
-                            # secret_key = seed + public_key # 64 bytes
-                            secret_key_bytes = seed_bytes + derived_pub_bytes
-                            secret_b58 = base58.b58encode(secret_key_bytes).decode('ascii')
-
-                            process.terminate()
-                            return address, secret_b58, False
-
-                        except Exception as inv_err:
-                            logging.error(f"Invariant check raised exception: {inv_err}")
-                            process.terminate()
-                            return None, None, True # Treat exception in invariant check as fatal to be safe
-
-            except json.JSONDecodeError:
-                pass
-            except Exception as e:
-                logging.error(f"Error parsing line: {e}")
-
+            # Print output for debugging/user visibility
             current_time = time.strftime("%H:%M:%S", time.localtime())
+            # Filter out progress bars if they clutter logs excessively,
+            # but usually it's fine or they are on stderr.
+            # We merged stderr, so we see everything.
             print(f"[{current_time}] ⛏️ GRINDER: {line_str}", flush=True)
+
+            # Parse Output
+            # Expected format example:
+            # Address: 8...
+            # Secret Key: [1, 2, ...] OR Secret Key: 4... (Base58)
+
+            if "Address:" in line_str:
+                parts = line_str.split("Address:")
+                if len(parts) > 1:
+                    found_address = parts[1].strip()
+
+            if "Secret Key:" in line_str:
+                parts = line_str.split("Secret Key:")
+                if len(parts) > 1:
+                    found_secret_str = parts[1].strip()
+
+            # Check if we have both
+            if found_address and found_secret_str:
+                logging.info(f"⛏️ GRINDER: KEY FOUND!")
+
+                try:
+                    # Parse secret key
+                    secret_bytes = None
+                    if found_secret_str.startswith("[") and found_secret_str.endswith("]"):
+                        # It's a JSON array
+                        try:
+                            int_list = json.loads(found_secret_str)
+                            secret_bytes = bytes(int_list)
+                        except json.JSONDecodeError:
+                            logging.error("Failed to parse secret key as JSON array")
+                    else:
+                        # Assume Base58 string
+                        try:
+                            secret_bytes = base58.b58decode(found_secret_str)
+                        except Exception:
+                            logging.error("Failed to decode secret key as Base58")
+
+                    if not secret_bytes or len(secret_bytes) != 64:
+                        logging.error(f"Invalid secret key length: {len(secret_bytes) if secret_bytes else 0}")
+                        # Reset and continue looking? Or abort?
+                        # Usually if we found one, we are done.
+                        # But if parsing failed, maybe we parsed the wrong line.
+                        # For safety, let's reset and continue if verification fails,
+                        # or terminate if we are sure it's the result.
+                        # But usually the tool exits after finding one.
+                        pass
+
+                    else:
+                        # CRITICAL: Verify Ed25519 Invariant
+                        # The secret key is full 64 bytes (private + public)
+                        priv_bytes = secret_bytes[:32]
+                        priv_key = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
+                        derived_pub_bytes = priv_key.public_key().public_bytes(
+                            encoding=serialization.Encoding.Raw,
+                            format=serialization.PublicFormat.Raw
+                        )
+                        derived_pub_b58 = base58.b58encode(derived_pub_bytes).decode('ascii')
+
+                        if derived_pub_b58 != found_address:
+                            logging.error("CRITICAL: Generated key FAILS Ed25519 invariant! Discarding.")
+                            logging.error(f"Provided Pub: {found_address}")
+                            logging.error(f"Derived Pub:  {derived_pub_b58}")
+
+                            process.terminate()
+                            return None, None, True # Fatal
+
+                        # All good
+                        secret_b58 = base58.b58encode(secret_bytes).decode('ascii')
+
+                        process.terminate()
+                        return found_address, secret_b58, False
+
+                except Exception as inv_err:
+                    logging.error(f"Invariant check raised exception: {inv_err}")
+                    process.terminate()
+                    return None, None, True
 
         process.wait()
 
         if process.returncode != 0:
             logging.error(f"Binary Error: Return Code {process.returncode}")
 
-        logging.error("Binary finished but no JSON output found.")
-        return None, None, False # Retry if just failed to find
+        logging.error("Binary finished but no valid keypair found.")
+        return None, None, False
 
     except Exception as e:
         logging.exception(f"Unexpected error in run_gpu_grinder: {e}")
@@ -123,10 +163,9 @@ def run_gpu_grinder(prefix, suffix):
 
 if __name__ == "__main__":
     print("🩺 DIAGNOSTIC: Checking GPU Health...")
-    try:
-        subprocess.run(["chmod", "+x", "./solanity"], check=False)
-    except Exception as e:
-        logging.error(f"Error chmoding binary: {e}")
+    # Skip chmod for new binary as it is built inside container usually with correct perms
+    # but doesn't hurt to try if we knew the path.
+    # Since path is dynamic/target dir, we skip chmod or do it if we find it.
 
     try:
         subprocess.run(["nvidia-smi"], check=False)
@@ -134,8 +173,6 @@ if __name__ == "__main__":
         logging.error("nvidia-smi not found. Ensure the container has GPU access.")
     except Exception as e:
         logging.error(f"Error running nvidia-smi: {e}")
-
-    # No nvcc check needed as we are in python runtime without nvcc likely
 
     TASK_JOB_ID = os.environ.get("TASK_JOB_ID")
     TASK_PREFIX = os.environ.get("TASK_PREFIX", "")
