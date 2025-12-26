@@ -29,13 +29,13 @@ __constant__ uint64_t K_SHA512[80] = {
     0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
 };
 
-#define ROR64(x, n) (((x) >> (n)) | ((x) << (64 - (n))))
-#define Ch(x, y, z) ((x & y) ^ (~x & z))
-#define Maj(x, y, z) ((x & y) ^ (x & z) ^ (y & z))
-#define Sigma0(x) (ROR64(x, 28) ^ ROR64(x, 34) ^ ROR64(x, 39))
-#define Sigma1(x) (ROR64(x, 14) ^ ROR64(x, 18) ^ ROR64(x, 41))
-#define Gamma0(x) (ROR64(x, 1) ^ ROR64(x, 8) ^ (x >> 7))
-#define Gamma1(x) (ROR64(x, 19) ^ ROR64(x, 61) ^ (x >> 6))
+#define GPU_ROR64(x, n) (((x) >> (n)) | ((x) << (64 - (n))))
+#define GPU_Ch(x, y, z) ((x & y) ^ (~x & z))
+#define GPU_Maj(x, y, z) ((x & y) ^ (x & z) ^ (y & z))
+#define GPU_Sigma0(x) (GPU_ROR64(x, 28) ^ GPU_ROR64(x, 34) ^ GPU_ROR64(x, 39))
+#define GPU_Sigma1(x) (GPU_ROR64(x, 14) ^ GPU_ROR64(x, 18) ^ GPU_ROR64(x, 41))
+#define GPU_Gamma0(x) (GPU_ROR64(x, 1) ^ GPU_ROR64(x, 8) ^ (x >> 7))
+#define GPU_Gamma1(x) (GPU_ROR64(x, 19) ^ GPU_ROR64(x, 61) ^ (x >> 6))
 
 // Simplified Load Big-Endian
 __device__ __forceinline__ uint64_t load64be(const unsigned char* p) {
@@ -95,12 +95,12 @@ __device__ void sha512_32byte_seed(const unsigned char* seed, unsigned char* out
         // Calculate W for t >= 16 on the fly or reuse buffer
         // Since we are register constrained, we recycle W array using mask
         if (t >= 16) {
-            W[t & 15] = Gamma1(W[(t - 2) & 15]) + W[(t - 7) & 15] +
-                        Gamma0(W[(t - 15) & 15]) + W[(t - 16) & 15];
+            W[t & 15] = GPU_Gamma1(W[(t - 2) & 15]) + W[(t - 7) & 15] +
+                        GPU_Gamma0(W[(t - 15) & 15]) + W[(t - 16) & 15];
         }
 
-        T1 = h + Sigma1(e) + Ch(e, f, g) + K_SHA512[t] + W[t & 15];
-        T2 = Sigma0(a) + Maj(a, b, c);
+        T1 = h + GPU_Sigma1(e) + GPU_Ch(e, f, g) + K_SHA512[t] + W[t & 15];
+        T2 = GPU_Sigma0(a) + GPU_Maj(a, b, c);
 
         h = g;
         g = f;

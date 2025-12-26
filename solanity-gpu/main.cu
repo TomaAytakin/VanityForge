@@ -328,6 +328,7 @@ void phase1_filter_kernel(
             fe_invert(recip, P.Z);
             fe y;
             fe_mul_ptx(y, P.Y, recip);
+            fe x;
             fe_mul_ptx(x, P.X, recip);
 
             int sign = fe_isnegative(x);
