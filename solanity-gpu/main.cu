@@ -3,12 +3,11 @@
  * Target: NVIDIA L4 (SM89)
  *
  * Architecture:
- * - Phase 1 (GPU): Seed Iterator -> Point Mult (NO SHA512)
- *   - "Raw" derivation for filtering.
+ * - Phase 1 (GPU): Seed Iterator -> SHA512 -> Clamp -> Point Mult
+ * - "Correct" derivation for filtering (Matches Ed25519 standard).
  * - Ring Buffer: Transfers 'seed index' to Host.
  * - Phase 2 (Host): Reconstructs Seed.
- *   - Verifies against "Correct" Ed25519 derivation (SHA512 + Clamp).
- *   - Verifies against "GPU" derivation to confirm match.
+ * - Verifies against "Correct" Ed25519 derivation (Double check).
  */
 
 #include <cuda_runtime.h>
@@ -26,10 +25,15 @@
 // Include ECC headers
 #include "fixedint.h"
 #include "fe.cu"
-#include "ge.h"           // Define ge_precomp struct before using it in precomp_data.h
-#include "precomp_data.h" // Include BEFORE ge.cu so 'base' is visible
+#include "ge.h"           
+#include "precomp_data.h" 
 #include "ge.cu"
-#include "sha512.cu"
+
+// Host-side SHA512 (for verification)
+#include "sha512.cu" 
+
+// GPU-side Optimized SHA512 (for grinding)
+#include "sha512_ed25519.cuh"
 
 // --- Macros ---
 
@@ -78,7 +82,6 @@ void load_tables() {
 
     size_t read_count = fread(host_base, sizeof(ge_precomp), 32 * 8, f);
     fclose(f);
-
     if (read_count != 32 * 8) {
         fprintf(stderr, "Error: precomp_tables.bin is corrupted (Read %zu items).\n", read_count);
         exit(1);
@@ -189,32 +192,38 @@ void phase1_filter_kernel(
     uint64_t start_index = random_offset + (uint64_t)tid;
     uint64_t local_iter = 0;
 
+    unsigned char seed[32];
+    unsigned char hash[64];
+
     while (true) {
         for (int attempt = 0; attempt < ATTEMPTS_PER_BATCH; attempt++) {
             uint64_t current_thread_step = local_iter + attempt;
             uint64_t current_val = start_index + (current_thread_step * (uint64_t)total_threads);
 
-            unsigned char seed[32];
+            // 1. Generate Seed (Random Counter)
             #pragma unroll
             for(int i=0; i<32; i++) seed[i] = 0;
-
+            
             uint64_t t_temp = current_val;
-
             for(int i=0; i<8; i++) {
                 seed[i] = t_temp & 0xFF;
                 t_temp >>= 8;
             }
 
-            // --- CORRECTNESS CHANGE START ---
-            // ❌ REMOVE SHA-512 and Clamp logic from GPU
-            // ✅ GPU must do ONLY this: ge_scalarmult_base(&P, seed);
+            // 2. Hash Seed (SHA-512) - GPU Optimized
+            // 
+            sha512_32byte_seed(seed, hash);
 
+            // 3. Clamp Hash (Ed25519 Standard)
+            hash[0] &= 248;
+            hash[31] &= 63;
+            hash[31] |= 64;
+
+            // 4. Point Multiplication (Scalar * Base Point)
             ge_p3 P;
-            ge_scalarmult_base(&P, seed); // Uses seed directly as scalar
+            ge_scalarmult_base(&P, hash); // Use clamped hash as scalar
 
-            // --- CORRECTNESS CHANGE END ---
-
-            // Convert to Bytes (Public Key)
+            // 5. Convert to Bytes (Public Key)
             fe recip;
             fe_invert(recip, P.Z);
             fe y;
@@ -226,7 +235,7 @@ void phase1_filter_kernel(
             fe_tobytes(s, y);
             s[31] ^= (sign << 7);
 
-            // Check Prefix
+            // 6. Check Prefix
             if (check_prefix(s)) {
                 // Backpressure: Drop if buffer > 50% full
                 uint32_t rh = ring->read_head;
@@ -242,7 +251,6 @@ void phase1_filter_kernel(
         }
 
         local_iter += ATTEMPTS_PER_BATCH;
-
         if (threadIdx.x == 0) {
             atomicAdd((unsigned long long*)&stats->total_hashes, (unsigned long long)(ATTEMPTS_PER_BATCH * blockDim.x));
         }
@@ -252,7 +260,6 @@ void phase1_filter_kernel(
 // --- Host Helper Functions ---
 
 const char* B58_DIGITS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
 int b58_index_host(char c) {
     const char *p = strchr(B58_DIGITS, c);
     if (p) return p - B58_DIGITS;
@@ -266,7 +273,6 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz) {
     int carry;
     size_t i, j, high, zcount = 0;
     size_t size;
-
     while (zcount < binsz && !bin[zcount]) ++zcount;
 
     size = (binsz - zcount) * 138 / 100 + 1;
@@ -283,7 +289,6 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz) {
     }
 
     for (j = 0; j < size && !buf[j]; ++j);
-
     if (*b58sz <= zcount + size - j) {
         *b58sz = zcount + size - j + 1;
         return false;
@@ -301,12 +306,10 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz) {
 bool phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_threads, uint64_t random_offset, const char* suffix_check, const char* prefix_check) {
     unsigned __int128 offset = (unsigned __int128)random_offset +
                                ((unsigned __int128)thread_id);
-
     unsigned __int128 current_val = offset + ((unsigned __int128)iter_count * (unsigned __int128)total_threads);
 
     unsigned char seed[32];
     memset(seed, 0, 32);
-
     unsigned __int128 temp = current_val;
     for(int i=0; i<8; i++) {
         seed[i] = (unsigned char)(temp & 0xFF);
@@ -314,6 +317,7 @@ bool phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
     }
 
     // 1. Calculate Derived Public Key (Standard Ed25519: Seed -> SHA512 -> Clamp -> P_derived)
+    // Uses Host SHA512 implementation
     unsigned char hash[64];
     sha512(seed, 32, hash);
     hash[0] &= 248;
@@ -374,7 +378,6 @@ int main(int argc, char** argv) {
 
     int host_prefix_len = 0;
     int host_prefix_indices[16];
-
     if (prefix_str) {
         host_prefix_len = strlen(prefix_str);
         if (host_prefix_len > 16) {
@@ -396,6 +399,8 @@ int main(int argc, char** argv) {
     load_tables();
 
     // Limit GPU to max 5 chars for filtering (Prefix-Only)
+    // IMPORTANT: With the Full Ed25519 fix, we are slower, so 5 chars might be aggressive.
+    // However, the logic remains valid.
     int gpu_prefix_len = host_prefix_len;
     if (gpu_prefix_len > 5) gpu_prefix_len = 5;
 
@@ -428,7 +433,7 @@ int main(int argc, char** argv) {
     std::uniform_int_distribution<uint64_t> dis;
     uint64_t random_offset = dis(gen);
 
-    printf("VanityForge Iterator (Probabilistic Filter)\n");
+    printf("VanityForge Iterator (Full Ed25519 Mode)\n");
     printf("GPU: %s\n", prop.name);
     printf("Random Offset: %lu\n", random_offset);
 
@@ -440,7 +445,6 @@ int main(int argc, char** argv) {
         d_ring,
         d_stats
     );
-
     CHECK_CUDA(cudaGetLastError());
 
     uint32_t local_read_head = 0;
@@ -452,12 +456,12 @@ int main(int argc, char** argv) {
         usleep(50000);
 
         uint32_t write_head = h_ring_mapped->write_head;
-
         while (local_read_head < write_head) {
             Candidate c = h_ring_mapped->items[local_read_head & RING_BUFFER_MASK];
             bool found = phase2_solve(c.thread_id, c.iter_count, total_threads, random_offset, suffix, prefix_str);
             if (found) {
-                return 0; // Exit cleanly on success
+                return 0;
+                // Exit cleanly on success
             }
             local_read_head++;
             if (write_head - local_read_head > RING_BUFFER_SIZE) {
@@ -468,10 +472,8 @@ int main(int argc, char** argv) {
 
         // Release backpressure
         h_ring_mapped->read_head = local_read_head;
-
         auto current_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = current_time - last_time;
-
         if (elapsed.count() >= 1.0) {
             unsigned long long current = h_stats_mapped->total_hashes;
             double speed = (double)(current - last_hashes) / elapsed.count() / 1000000.0;
