@@ -24,10 +24,95 @@
 
 // Include ECC headers
 #include "fixedint.h"
+#include "fe.h" // Include header first
+#include "fe_ptx.cuh" // Include PTX implementation
+
+// --- PTX Math Replacement Macro Logic ---
+// We want to force ge.cu to use fe_mul_ptx/fe_sq_ptx when compiling for device.
+// ge.cu uses 'fe_mul' and 'fe_sq'.
+// We define macros to redirect these calls.
+// Note: fe.cu implementation of fe_mul/fe_sq has __device__ __host__ qualifiers.
+// If we define macro, we mask the function declaration in fe.cu if we include it after.
+// But we need fe.cu for host-side execution and for other functions (fe_add, etc).
+// The only way to cleanly swap is if we use the macro only for ge.cu?
+// Or we can rely on C++ overloading? No, signatures are identical.
+//
+// STRATEGY:
+// 1. Include fe.cu (provides standard fe_mul implementation).
+// 2. Define macros `fe_mul` -> `fe_mul_ptx` ONLY for __CUDA_ARCH__.
+//    But preprocessor runs before compilation.
+//    If we do `#define fe_mul fe_mul_ptx`, then host code also tries to use fe_mul_ptx.
+//    fe_mul_ptx is `__device__` only. Host compilation will fail.
+//
+//    Correct approach:
+//    Rename standard functions in fe.cu? No, I can't touch fe.cu easily.
+//
+//    Wait, I can include `fe.cu` first.
+//    Then define macros.
+//    Then include `ge.cu`.
+//
+//    `fe.cu`: `void fe_mul(...) {...}` defined.
+//    `ge.cu` calls `fe_mul(...)`.
+//    If I define `#define fe_mul(h,f,g) fe_mul_ptx(h,f,g)` before including `ge.cu`,
+//    then `ge.cu` will call `fe_mul_ptx` inside its functions.
+//
+//    However, this macro applies to both Host and Device code in `ge.cu`.
+//    `ge.cu` functions are `__host__ __device__`.
+//    If they call `fe_mul_ptx`, it must be available on Host. It is NOT.
+//
+//    So we need a dispatcher?
+//
+//    `__device__ __forceinline__ void fe_mul_dispatch(fe h, const fe f, const fe g) { fe_mul_ptx(h,f,g); }`
+//    `__host__ void fe_mul_dispatch(fe h, const fe f, const fe g) { fe_mul(h,f,g); }` (calls original)
+//
+//    But `fe_mul` (original) is defined in `fe.cu`.
+//
+//    If I define:
+//    ```
+//    #ifdef __CUDA_ARCH__
+//      #define fe_mul fe_mul_ptx
+//      #define fe_sq fe_sq_ptx
+//    #endif
+//    ```
+//    Macros don't respect `__CUDA_ARCH__` (which is a compiler define, yes, but preprocessor sees it during device compilation pass).
+//    NVCC splits compilation.
+//    During device pass, `__CUDA_ARCH__` is defined.
+//    During host pass, it is not.
+//
+//    So yes, wrapping macros in `#ifdef __CUDA_ARCH__` works!
+//
+//    BUT, `fe.cu` is included. `fe_mul` is defined as a symbol.
+//    If I `#define fe_mul ...`, I am shadowing the function name with a macro.
+//    Calls in `ge.cu` will use the macro.
+//    This is what we want for device pass.
+//
+//    So:
+//    1. Include `fe.cu` (defines standard functions).
+//    2. Include `fe_ptx.cuh` (defines ptx functions).
+//    3. `#ifdef __CUDA_ARCH__`
+//       `#define fe_mul fe_mul_ptx`
+//       `#define fe_sq fe_sq_ptx`
+//       `#endif`
+//    4. Include `ge.cu` (calls `fe_mul` -> macro -> `fe_mul_ptx` on device).
+//
+//    This works perfectly.
+
 #include "fe.cu"
+
+#ifdef __CUDA_ARCH__
+    #define fe_mul fe_mul_ptx
+    #define fe_sq fe_sq_ptx
+#endif
+
 #include "ge.h"           
 #include "precomp_data.h" 
 #include "ge.cu"
+
+// Undefine to avoid messing up subsequent host code (though main is last)
+#ifdef __CUDA_ARCH__
+    #undef fe_mul
+    #undef fe_sq
+#endif
 
 // Host-side SHA512 (for verification)
 #include "sha512.cu" 
@@ -122,10 +207,11 @@ struct Stats {
 // Store target prefix indices for GPU filtering
 __constant__ int c_prefix_indices[16];
 __constant__ int c_prefix_len;
+// Store target suffix indices for GPU filtering
+__constant__ int c_suffix_indices[16];
+__constant__ int c_suffix_len;
 
-__device__ bool check_prefix(const unsigned char* s) {
-    if (c_prefix_len == 0) return true;
-
+__device__ bool check_match(const unsigned char* s) {
     // 1. Count leading zeros
     int zcount = 0;
     while (zcount < 32 && !s[zcount]) zcount++;
@@ -160,17 +246,28 @@ __device__ bool check_prefix(const unsigned char* s) {
     int buf_start = 0;
     while (buf_start < size && buf[buf_start] == 0) buf_start++;
 
-    for (int k = 0; k < c_prefix_len; k++) {
-        int val;
-        if (k < zcount) {
-            val = 0;
-        } else {
-            int offset = k - zcount;
-            int buf_idx = buf_start + offset;
-            if (buf_idx >= size) return false;
-            val = buf[buf_idx];
+    // Prefix Check
+    if (c_prefix_len > 0) {
+        for (int k = 0; k < c_prefix_len; k++) {
+            int val;
+            if (k < zcount) {
+                val = 0;
+            } else {
+                int offset = k - zcount;
+                int buf_idx = buf_start + offset;
+                if (buf_idx >= size) return false;
+                val = buf[buf_idx];
+            }
+            if (val != c_prefix_indices[k]) return false;
         }
-        if (val != c_prefix_indices[k]) return false;
+    }
+
+    // Suffix Check
+    if (c_suffix_len > 0) {
+        for (int k = 0; k < c_suffix_len; k++) {
+            // Compare end of buffer against suffix indices
+            if (buf[50 - c_suffix_len + k] != c_suffix_indices[k]) return false;
+        }
     }
 
     return true;
@@ -221,15 +318,18 @@ void phase1_filter_kernel(
 
             // 4. Point Multiplication (Scalar * Base Point)
             ge_p3 P;
-            ge_scalarmult_base(&P, hash); // Use clamped hash as scalar
+
+            // This calls ge_scalarmult_base.
+            // Because we used macros before including ge.cu, on Device logic this will use fe_mul_ptx!
+            ge_scalarmult_base(&P, hash);
 
             // 5. Convert to Bytes (Public Key)
             fe recip;
             fe_invert(recip, P.Z);
             fe y;
-            fe_mul(y, P.Y, recip);
-            fe x;
-            fe_mul(x, P.X, recip);
+            fe_mul_ptx(y, P.Y, recip);
+            fe_mul_ptx(x, P.X, recip);
+
             int sign = fe_isnegative(x);
             unsigned char s[32];
             fe_tobytes(s, y);
@@ -242,8 +342,8 @@ void phase1_filter_kernel(
                 printf("\n");
             }
 
-            // 6. Check Prefix
-            if (check_prefix(s)) {
+            // 6. Check Match (Prefix + Suffix)
+            if (check_match(s)) {
                 // Backpressure: Drop if buffer > 50% full
                 uint32_t rh = ring->read_head;
                 uint32_t wh = ring->write_head;
@@ -332,6 +432,7 @@ bool phase2_solve(uint64_t thread_id, uint64_t iter_count, uint32_t total_thread
     hash[31] |= 64;
 
     ge_p3 P_derived;
+    // Uses host-side standard math (no macros)
     ge_scalarmult_base(&P_derived, hash);
     unsigned char publick_derived[32];
     ge_p3_tobytes(publick_derived, &P_derived);
@@ -402,19 +503,44 @@ int main(int argc, char** argv) {
         printf("Target Prefix: %s (Len: %d)\n", prefix_str, host_prefix_len);
     }
 
+    int host_suffix_len = 0;
+    int host_suffix_indices[16];
+    if (suffix) {
+        host_suffix_len = strlen(suffix);
+        if (host_suffix_len > 4) {
+            fprintf(stderr, "Error: Suffix too long (max 4)\n");
+            exit(1);
+        }
+        for (int i=0; i<host_suffix_len; i++) {
+            int idx = b58_index_host(suffix[i]);
+            if (idx < 0) {
+                fprintf(stderr, "Error: Invalid Base58 character '%c'\n", suffix[i]);
+                exit(1);
+            }
+            host_suffix_indices[i] = idx;
+        }
+        printf("Target Suffix: %s (Len: %d)\n", suffix, host_suffix_len);
+    }
+
     cudaSetDevice(device);
     load_tables();
 
-    // Limit GPU to max 5 chars for filtering (Prefix-Only)
-    // IMPORTANT: With the Full Ed25519 fix, we are slower, so 5 chars might be aggressive.
-    // However, the logic remains valid.
+    // Limit GPU to max 6 chars for prefix (was 5), and 4 for suffix
     int gpu_prefix_len = host_prefix_len;
-    if (gpu_prefix_len > 5) gpu_prefix_len = 5;
+    if (gpu_prefix_len > 6) gpu_prefix_len = 6;
+
+    int gpu_suffix_len = host_suffix_len;
+    if (gpu_suffix_len > 4) gpu_suffix_len = 4;
 
     CHECK_CUDA(cudaMemcpyToSymbol(c_prefix_len, &gpu_prefix_len, sizeof(int)));
     // We still copy all indices, but kernel only uses gpu_prefix_len
     if (host_prefix_len > 0) {
         CHECK_CUDA(cudaMemcpyToSymbol(c_prefix_indices, host_prefix_indices, sizeof(int) * host_prefix_len));
+    }
+
+    CHECK_CUDA(cudaMemcpyToSymbol(c_suffix_len, &gpu_suffix_len, sizeof(int)));
+    if (host_suffix_len > 0) {
+        CHECK_CUDA(cudaMemcpyToSymbol(c_suffix_indices, host_suffix_indices, sizeof(int) * host_suffix_len));
     }
 
     DeviceRingBuffer* d_ring;
@@ -440,7 +566,7 @@ int main(int argc, char** argv) {
     std::uniform_int_distribution<uint64_t> dis;
     uint64_t random_offset = dis(gen);
 
-    printf("VanityForge Iterator (Full Ed25519 Mode)\n");
+    printf("VanityForge Iterator (Full Ed25519 Mode + PTX Math)\n");
     printf("GPU: %s\n", prop.name);
     printf("Random Offset: %lu\n", random_offset);
 
