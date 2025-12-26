@@ -92,7 +92,7 @@ void load_tables() {
 // --- Configuration ---
 
 #define BLOCK_SIZE 256
-#define ATTEMPTS_PER_BATCH 64
+#define ATTEMPTS_PER_BATCH 256
 #define BATCH_SIZE ATTEMPTS_PER_BATCH
 #define RING_BUFFER_SIZE 1024
 #define RING_BUFFER_MASK (RING_BUFFER_SIZE - 1)
@@ -106,6 +106,7 @@ struct Candidate {
 
 struct DeviceRingBuffer {
     uint32_t write_head;
+    volatile uint32_t read_head;
     Candidate items[RING_BUFFER_SIZE];
 };
 
@@ -227,11 +228,16 @@ void phase1_filter_kernel(
 
             // Check Prefix
             if (check_prefix(s)) {
-                uint32_t slot = atomicAdd(&ring->write_head, 1);
-                Candidate c;
-                c.thread_id = tid;
-                c.iter_count = current_thread_step;
-                ring->items[slot & RING_BUFFER_MASK] = c;
+                // Backpressure: Drop if buffer > 50% full
+                uint32_t rh = ring->read_head;
+                uint32_t wh = ring->write_head;
+                if ((wh - rh) < (RING_BUFFER_SIZE / 2)) {
+                    uint32_t slot = atomicAdd(&ring->write_head, 1);
+                    Candidate c;
+                    c.thread_id = tid;
+                    c.iter_count = current_thread_step;
+                    ring->items[slot & RING_BUFFER_MASK] = c;
+                }
             }
         }
 
@@ -389,7 +395,12 @@ int main(int argc, char** argv) {
     cudaSetDevice(device);
     load_tables();
 
-    CHECK_CUDA(cudaMemcpyToSymbol(c_prefix_len, &host_prefix_len, sizeof(int)));
+    // Limit GPU to max 5 chars for filtering (Prefix-Only)
+    int gpu_prefix_len = host_prefix_len;
+    if (gpu_prefix_len > 5) gpu_prefix_len = 5;
+
+    CHECK_CUDA(cudaMemcpyToSymbol(c_prefix_len, &gpu_prefix_len, sizeof(int)));
+    // We still copy all indices, but kernel only uses gpu_prefix_len
     if (host_prefix_len > 0) {
         CHECK_CUDA(cudaMemcpyToSymbol(c_prefix_indices, host_prefix_indices, sizeof(int) * host_prefix_len));
     }
@@ -454,6 +465,9 @@ int main(int argc, char** argv) {
                 printf("[Warn] Ring Buffer Overflow!\n");
             }
         }
+
+        // Release backpressure
+        h_ring_mapped->read_head = local_read_head;
 
         auto current_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = current_time - last_time;
