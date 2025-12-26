@@ -31,13 +31,7 @@ def run_gpu_grinder(prefix, suffix):
     fatal_error is True if we should NOT retry (e.g. Invariant Failure)
     """
     # New Rust binary path
-    binary_path = "./target/release/solana-vanity-gen-gpu"
-
-    # Fallback if binary is not found (for local testing or if name differs)
-    if not os.path.exists(binary_path):
-        # Try finding it in current dir or basic target/release
-        if os.path.exists("./solana-vanity-gen-gpu"):
-            binary_path = "./solana-vanity-gen-gpu"
+    binary_path = "solana-vanity"
 
     cmd = [binary_path]
     cmd.append("--gpu")
