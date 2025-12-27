@@ -116,6 +116,12 @@
         }
         .font-cn { font-family: 'PingFang SC', 'Microsoft YaHei', 'Source Han Sans CN', 'Segoe UI', sans-serif !important; }
         .font-en { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+        #admin-master-control, .admin-exclusive {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center px-4">
@@ -127,9 +133,11 @@
                     <div class="flex-shrink-0 flex items-center gap-3">
                         <span class="text-purple-500 font-bold text-xl tracking-wider uppercase"><i class="fa-solid fa-fire-flame-curved"></i> VanityForge</span>
                         <!-- Admin Info Container -->
-                        <div id="admin-info-container" class="flex items-center gap-2">
-                             <a href="#" onclick="toggleAdminDashboard(); return false;" id="nav-dev" class="hidden nav-item text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-2 py-1 rounded-md text-xs font-bold transition-colors animate-pulse"><i class="fa-solid fa-bolt"></i> <span data-i18n="nav.welcome_dev">DEV</span></a>
-                             <!-- God Mode Badge Injected Here -->
+                        <div id="admin-master-control" style="display: none !important;">
+                            <div id="admin-info-container" class="flex items-center gap-2">
+                                <a href="#" onclick="toggleAdminDashboard(); return false;" id="nav-dev" class="hidden nav-item text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-2 py-1 rounded-md text-xs font-bold transition-colors animate-pulse"><i class="fa-solid fa-bolt"></i> <span data-i18n="nav.welcome_dev">DEV</span></a>
+                                <!-- God Mode Badge Injected Here -->
+                            </div>
                         </div>
                     </div>
                     <div class="hidden md:block">
@@ -1137,6 +1145,14 @@
 
             // God Mode Check
             if (ADMIN_EMAILS.includes(currentUserEmail)) {
+                // Reveal the master control
+                const masterControl = document.getElementById('admin-master-control');
+                if (masterControl) {
+                    masterControl.style.setProperty('display', 'flex', 'important');
+                    masterControl.style.setProperty('visibility', 'visible', 'important');
+                    masterControl.style.setProperty('pointer-events', 'auto', 'important');
+                }
+
                 // Update text to "Welcome Dev" if not already set (rely on I18n but allow override)
                 // But better to move this into the Admin Info Container
                 const adminContainer = document.getElementById('admin-info-container');
@@ -1152,6 +1168,13 @@
                         godModeBadge.id = "god-mode-badge";
                         adminContainer.appendChild(godModeBadge);
                      }
+                }
+            } else {
+                const masterControl = document.getElementById('admin-master-control');
+                if (masterControl) {
+                    masterControl.style.setProperty('display', 'none', 'important');
+                    masterControl.style.setProperty('visibility', 'hidden', 'important');
+                    masterControl.style.setProperty('pointer-events', 'none', 'important');
                 }
             }
 

@@ -136,6 +136,14 @@ async function checkAdmin() {
         const data = await res.json();
 
         if (data.isAdmin) {
+            // Reveal the master control
+            const masterControl = document.getElementById('admin-master-control');
+            if (masterControl) {
+                masterControl.style.setProperty('display', 'flex', 'important');
+                masterControl.style.setProperty('visibility', 'visible', 'important');
+                masterControl.style.setProperty('pointer-events', 'auto', 'important');
+            }
+
             // 2. Show Navbar Item
             const devBtn = document.getElementById('nav-dev');
             if (devBtn) {
@@ -152,6 +160,13 @@ async function checkAdmin() {
                     }
                 }
             }, 2000); // Wait for UI to settle
+        } else {
+            const masterControl = document.getElementById('admin-master-control');
+            if (masterControl) {
+                masterControl.style.setProperty('display', 'none', 'important');
+                masterControl.style.setProperty('visibility', 'hidden', 'important');
+                masterControl.style.setProperty('pointer-events', 'none', 'important');
+            }
         }
     } catch (e) {
         console.error("Admin check failed", e);
