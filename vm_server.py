@@ -808,6 +808,8 @@ def submit_job():
             if not verify_payment(tx_sig, price): return jsonify({'error': 'Payment verification failed'}), 402
 
         job_id = str(uuid.uuid4())
+        if tx_sig:
+             logging.info(f"💰 Job {job_id} Payment: {tx_sig}")
         
         # --- JOB QUEUE LOGIC ---
         # Determine Worker Type & Cloud Status
