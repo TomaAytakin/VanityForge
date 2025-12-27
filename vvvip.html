@@ -20,10 +20,26 @@
         window.SOLANA_RPC = {{ rpc_url|tojson }};
     </script>
     <script type="module" src="utils/sns.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     <style>
         body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 80px; }
-        .glass-panel { background: rgba(40, 40, 40, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .glass-panel { background: rgba(18, 18, 18, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+
+        /* Navbar Hover Effects */
+        .nav-item { position: relative; }
+        .nav-item::after {
+            content: ''; position: absolute; bottom: 0; left: 50%; width: 0; height: 2px;
+            background-color: #a855f7; transition: all 0.3s ease-out; transform: translateX(-50%);
+        }
+        .nav-item:hover::after { width: 80%; }
+
+        .active-nav-glow {
+            box-shadow: 0 0 15px #8b5cf6;
+            border: 1px solid rgba(139, 92, 246, 0.5);
+            background-color: rgba(139, 92, 246, 0.1) !important;
+            color: white !important;
+        }
+
         /* Custom scrollbar for better aesthetics */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1a1a1a; }
@@ -42,17 +58,17 @@
                     </div>
                     <div class="hidden md:block">
                         <div class="ml-10 flex items-baseline space-x-4">
-                            <a href="/" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
-                            <a href="/vvvip" class="text-white bg-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors">VVVIP Addresses</a>
-                            <a href="/roadmap" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
-                            <a href="/faq" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
-                            <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-x-twitter"></i></a>
-                            <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
+                            <a href="/" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors">Forge</a>
+                            <a href="/vvvip" class="nav-item active-nav-glow px-3 py-2 rounded-md text-sm font-medium transition-colors">VVVIP Addresses</a>
+                            <a href="/roadmap" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors">Roadmap</a>
+                            <a href="/faq" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors">FAQ</a>
+                            <a href="https://x.com/vanityforgeX" target="_blank" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-x-twitter"></i></a>
+                            <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
                         </div>
                     </div>
                 </div>
                 <div class="-mr-2 flex md:hidden">
-                    <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white">
+                    <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="bg-gray-800/80 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white backdrop-blur">
                         <span class="sr-only">Open main menu</span>
                         <i class="fa-solid fa-bars"></i>
                     </button>
@@ -61,9 +77,9 @@
         </div>
 
         <div class="hidden md:hidden" id="mobile-menu">
-            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3 glass-panel border-t border-gray-700/50">
                 <a href="/" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Forge</a>
-                <a href="/vvvip" class="text-white bg-gray-900 block px-3 py-2 rounded-md text-base font-medium">VVVIP Addresses</a>
+                <a href="/vvvip" class="text-white bg-purple-900/50 block px-3 py-2 rounded-md text-base font-medium border border-purple-500/30">VVVIP Addresses</a>
                 <a href="/roadmap" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Roadmap</a>
                 <a href="/faq" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium">FAQ</a>
                 <a href="https://x.com/vanityforgeX" target="_blank" class="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium"><i class="fa-brands fa-x-twitter"></i> X (Twitter)</a>

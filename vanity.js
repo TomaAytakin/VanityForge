@@ -29,43 +29,99 @@ function initLiveActivityCounter() {
     }
 
     let currentCount = getDeterministicCount();
+    // Initialize Odometer (replace text with DOM structure)
+    // We format it as a string with commas
+    let currentStr = currentCount.toLocaleString();
+    counterElement.innerHTML = ''; // Clear text
+    let digitElements = [];
 
-    function updateDisplay(count) {
-        // Format with commas
-        const start = parseInt(counterElement.innerText.replace(/,/g, '')) || 0;
-        const end = count;
-        if (start === end) return;
+    // Create a slot for each char (digit or comma)
+    for (let char of currentStr) {
+        let span = document.createElement('span');
+        if (char === ',') {
+             span.innerText = ',';
+             span.className = 'odometer-val';
+             counterElement.appendChild(span);
+        } else {
+             // Create wrapper
+             let wrapper = document.createElement('span');
+             wrapper.className = 'odometer-digit';
+             // Create ribbon (01234567890)
+             let ribbon = document.createElement('span');
+             ribbon.className = 'odometer-ribbon';
+             ribbon.innerText = '0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n0';
+             // We need vertical stacking. textContent with \n works if we set white-space: pre
+             // Or better, use innerHTML with <br> or block display
+             ribbon.innerHTML = '0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>0';
 
-        // Simple odometer animation
-        const duration = 1000;
-        const startTime = performance.now();
+             wrapper.appendChild(ribbon);
+             counterElement.appendChild(wrapper);
 
-        function animate(currentTime) {
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            // Ease out
-            const ease = 1 - Math.pow(1 - progress, 3);
-
-            const current = Math.floor(start + (end - start) * ease);
-            counterElement.innerText = current.toLocaleString();
-
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
-                counterElement.innerText = end.toLocaleString();
-            }
+             // Initial position
+             let digit = parseInt(char);
+             ribbon.style.transform = `translateY(-${digit * 1.2}em)`;
+             digitElements.push({ wrapper, ribbon, currentDigit: digit });
         }
-
-        requestAnimationFrame(animate);
     }
 
-    // Initial display
-    updateDisplay(currentCount);
+    function updateDisplay(newCount) {
+        const newStr = newCount.toLocaleString();
+
+        // If length changed, rebuild (simple fallback)
+        if (newStr.length !== currentStr.length) {
+             counterElement.innerHTML = '';
+             digitElements = [];
+             for (let char of newStr) {
+                if (char === ',') {
+                    let span = document.createElement('span');
+                    span.innerText = ',';
+                    span.className = 'odometer-val';
+                    counterElement.appendChild(span);
+                } else {
+                    let wrapper = document.createElement('span');
+                    wrapper.className = 'odometer-digit';
+                    let ribbon = document.createElement('span');
+                    ribbon.className = 'odometer-ribbon';
+                    ribbon.innerHTML = '0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>0';
+                    wrapper.appendChild(ribbon);
+                    counterElement.appendChild(wrapper);
+
+                    let digit = parseInt(char);
+                    ribbon.style.transform = `translateY(-${digit * 1.2}em)`;
+                    digitElements.push({ wrapper, ribbon, currentDigit: digit });
+                }
+             }
+             currentStr = newStr;
+             return;
+        }
+
+        // Animate changes
+        let digitIndex = 0;
+        for (let i = 0; i < newStr.length; i++) {
+            if (newStr[i] === ',') continue;
+
+            let targetDigit = parseInt(newStr[i]);
+            let el = digitElements[digitIndex];
+
+            if (el.currentDigit !== targetDigit) {
+                // Determine direction. Usually roll UP.
+                // If going from 9 to 0, we move to the 11th slot (10=0) then reset?
+                // Simplest CSS transition: just move to new Y.
+                // If wrapping (e.g. 9->0), we might need logic, but for simple counter incrementing:
+                // usually we just set the transform.
+
+                // Let's assume standard movement for now.
+                el.ribbon.style.transform = `translateY(-${targetDigit * 1.2}em)`;
+                el.currentDigit = targetDigit;
+            }
+            digitIndex++;
+        }
+        currentStr = newStr;
+    }
 
     // Live Pulse Logic
     function scheduleNextPulse() {
-        // Random delay between 10s (10000ms) and 30s (30000ms)
-        const delay = Math.floor(Math.random() * (30000 - 10000 + 1) + 10000);
+        const delay = Math.floor(Math.random() * (10000 - 2000 + 1) + 2000); // Faster pulse for demo? User said "Real-Time". 2-10s
         setTimeout(() => {
             pulse();
         }, delay);
@@ -79,7 +135,7 @@ function initLiveActivityCounter() {
         gearIcon.classList.add('gear-fast');
         setTimeout(() => {
             gearIcon.classList.remove('gear-fast');
-        }, 2000); // Spin fast for 2 seconds
+        }, 2000);
 
         scheduleNextPulse();
     }
