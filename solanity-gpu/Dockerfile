@@ -27,4 +27,8 @@ RUN curl -L https://github.com/solana-labs/solana/releases/download/v1.18.4/sola
 # Copy the worker script
 COPY worker.py .
 
+# Create non-root user
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
 CMD ["python3", "worker.py"]
