@@ -89,10 +89,34 @@ def block_hidden_paths():
         abort(403)
 
 @app.after_request
-def set_security_headers(response):
+def set_security_and_caching_headers(response):
+    # --- SECURITY HEADERS ---
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['Content-Security-Policy'] = "default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval';"
+
+    # --- CACHING HEADERS (INFRASTRUCTURE SUPPORT) ---
+    path = request.path
+
+    # List of dynamic API endpoints that must NEVER be cached
+    # Note: /api/* covers most, but specific routes are listed for safety
+    no_cache_paths = [
+        '/submit-job', '/check-user', '/set-pin', '/reveal-key'
+    ]
+
+    is_api = path.startswith('/api/') or path in no_cache_paths
+
+    if is_api:
+        # Dynamic: Bypass CDN & Browser Cache
+        response.headers['Cache-Control'] = 'private, no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    else:
+        # Static: Enable Cloud CDN Caching
+        # Applies to: /, /roadmap, /faq, /vvvip, *.html, *.css, *.js, *.json, *.png, etc.
+        # We use public caching with a 1-hour max-age
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+
     return response
 
 CORS(app, resources={r"/*": {"origins": ["https://tomaaytakin.github.io", "https://vanityforge.org"]}})
