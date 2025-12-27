@@ -4,7 +4,6 @@ import os
 import glob
 import sys
 import base58
-import argparse
 import logging
 import google.cloud.logging
 from google.cloud.logging.handlers import CloudLoggingHandler
@@ -25,19 +24,50 @@ def setup_logging():
 def main():
     setup_logging()
     
-    parser = argparse.ArgumentParser(description='CPU Grinder Worker')
-    parser.add_argument('--prefix', type=str, help='Prefix to search for')
-    parser.add_argument('--suffix', type=str, help='Suffix to search for')
-    parser.add_argument('--case-sensitive', type=str, choices=['true', 'false'], default='true', help='Case sensitivity')
+    # Manual argument parsing to be more robust on Cloud Run
+    prefix = None
+    suffix = None
+    case_sensitive = 'true'
 
-    # Cloud Run Jobs might pass arguments via sys.argv in a way that argparse handles naturally.
-    # If the entrypoint is `python3 worker.py` and arguments are appended, `sys.argv` will be populated correctly.
-    args = parser.parse_args()
+    args = sys.argv[1:]
+    logging.info(f"Raw arguments: {args}")
 
-    logging.info(f"Starting job with args: {args}")
-
-    prefix = args.prefix
-    suffix = args.suffix
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == '--prefix':
+            if i + 1 < len(args):
+                prefix = args[i+1]
+                i += 2
+            else:
+                logging.error("--prefix requires an argument")
+                sys.exit(1)
+        elif arg.startswith('--prefix='):
+            prefix = arg.split('=', 1)[1]
+            i += 1
+        elif arg == '--suffix':
+            if i + 1 < len(args):
+                suffix = args[i+1]
+                i += 2
+            else:
+                logging.error("--suffix requires an argument")
+                sys.exit(1)
+        elif arg.startswith('--suffix='):
+            suffix = arg.split('=', 1)[1]
+            i += 1
+        elif arg == '--case-sensitive':
+            if i + 1 < len(args):
+                case_sensitive = args[i+1]
+                i += 2
+            else:
+                logging.error("--case-sensitive requires an argument")
+                sys.exit(1)
+        elif arg.startswith('--case-sensitive='):
+            case_sensitive = arg.split('=', 1)[1]
+            i += 1
+        else:
+            # Ignore unknown args or handle as needed
+            i += 1
 
     grind_args = []
     if prefix:
@@ -45,27 +75,18 @@ def main():
     elif suffix:
         grind_args.extend(["--ends-with", f"{suffix}:1"])
     else:
-        error_msg = "No pattern provided"
+        error_msg = "No pattern provided (prefix or suffix required)"
         logging.error(error_msg)
         print(json.dumps({"found": False, "error": error_msg}))
         sys.exit(1)
 
-    # Note: solana-keygen grind is case-sensitive by default.
-    # If case-insensitive is requested, we might need to handle it.
-    # However, existing logic only supported case-sensitive matching implicitly or explicitly.
-    # The --case-sensitive flag is present in the arguments passed by the dispatcher.
-    if args.case_sensitive == 'false':
+    if case_sensitive == 'false':
         grind_args.append("--ignore-case")
 
-    # Use full path to ensure reliability, or fallback to PATH
-    solana_keygen_path = "/root/.local/share/solana/install/active_release/bin/solana-keygen"
-    if not os.path.exists(solana_keygen_path):
-        solana_keygen_path = "solana-keygen"
-        logging.info("Using solana-keygen from PATH")
-    else:
-        logging.info(f"Using solana-keygen at {solana_keygen_path}")
+    # Use solana-keygen from PATH (installed in Dockerfile)
+    solana_keygen_cmd = "solana-keygen"
 
-    command = [solana_keygen_path, "grind"] + grind_args
+    command = [solana_keygen_cmd, "grind"] + grind_args
 
     logging.info(f"Running command: {command}")
 
@@ -73,7 +94,7 @@ def main():
         # Run the grind
         process = subprocess.run(command, capture_output=True, text=True, check=True)
 
-        # Log stdout/stderr for debugging (be careful with secrets, but grind usually just outputs status)
+        # Log stdout/stderr for debugging
         logging.info(f"Command stdout: {process.stdout}")
 
         # Find the .json file solana-keygen just made
@@ -113,6 +134,10 @@ def main():
     except subprocess.CalledProcessError as e:
         logging.error(f"Subprocess error: {e.stderr}")
         print(json.dumps({"found": False, "error": str(e)}))
+        sys.exit(1)
+    except FileNotFoundError:
+        logging.error("solana-keygen not found in PATH")
+        print(json.dumps({"found": False, "error": "solana-keygen executable not found"}))
         sys.exit(1)
     except Exception as e:
         logging.exception("Unexpected error")
