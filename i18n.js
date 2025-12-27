@@ -61,7 +61,7 @@ const I18n = {
             const text = this.t(key);
             if (text) {
                 // If it's a security description, use innerHTML to allow tags (if present)
-                if (key.includes('_desc')) {
+                if (key.includes('_desc') || key.includes('legal') || key.includes('beta.desc')) {
                     el.innerHTML = text;
                 } else {
                     if (el.children.length === 0) {
@@ -77,25 +77,29 @@ const I18n = {
                         if (textNode) {
                             textNode.nodeValue = text;
                         } else {
-                            console.warn("Element with data-i18n has children but no text node found to replace:", el);
+                            // Try to replace innerText if safe? No, might clobber icons.
+                            // But usually, button text is separate.
+                            // For buttons like "Check", "Forge", they might be simple text.
+                            // Let's assume the text node logic is sufficient for now, or fallback to innerText if no children other than text.
+                            // However, we see <i class> inside buttons.
+                            // If we fail to find a text node, we might want to append? No.
                         }
                     }
                 }
             }
         });
 
-        // 1. Placeholder
-        const prefixInput = document.getElementById('prefix');
-        const suffixInput = document.getElementById('suffix');
-        if (prefixInput) {
-            if (this.locale === 'zh-CN') {
-                prefixInput.placeholder = "8888";
-                if(suffixInput) suffixInput.placeholder = "666";
-            } else {
-                prefixInput.placeholder = "e.g. CAFE";
-                if(suffixInput) suffixInput.placeholder = "e.g. 888";
+        // Update elements with data-i18n-placeholder
+        document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+            const key = el.getAttribute('data-i18n-placeholder');
+            const text = this.t(key);
+            if (text) {
+                el.placeholder = text;
             }
-        }
+        });
+
+        // 1. Placeholder Legacy (Keep for compatibility if needed, but data-i18n-placeholder handles it)
+        // We can remove the hardcoded prefix/suffix logic now since we use attributes.
 
         // 2. Fonts
         if (this.locale === 'zh-CN') {
