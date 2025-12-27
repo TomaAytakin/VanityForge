@@ -9,29 +9,8 @@ function initLiveActivityCounter() {
 
     if (!counterElement || !gearIcon) return;
 
-    const START_DATE = new Date("2024-12-01T00:00:00Z");
-    const BASE_COUNT = 4242;
-    const DAILY_RATE = 45;
-
-    function getDeterministicCount() {
-        const now = new Date();
-        const diffTime = now.getTime() - START_DATE.getTime();
-        // Convert milliseconds to days
-        const daysElapsed = diffTime / (1000 * 3600 * 24);
-
-        // Micro-jitter: based on current UTC hour
-        const currentHour = now.getUTCHours();
-        const jitter = (currentHour * 7) % 13;
-
-        // Calculate total
-        const count = Math.floor(BASE_COUNT + (daysElapsed * DAILY_RATE) + jitter);
-        return count;
-    }
-
-    let currentCount = getDeterministicCount();
-    // Initialize Odometer (replace text with DOM structure)
-    // We format it as a string with commas
-    let currentStr = currentCount.toLocaleString();
+    let currentCount = 0; // Default until fetch
+    let currentStr = "0";
     counterElement.innerHTML = ''; // Clear text
     let digitElements = [];
 
@@ -119,29 +98,35 @@ function initLiveActivityCounter() {
         currentStr = newStr;
     }
 
-    // Live Pulse Logic
-    function scheduleNextPulse() {
-        const delay = Math.floor(Math.random() * (10000 - 2000 + 1) + 2000); // Faster pulse for demo? User said "Real-Time". 2-10s
-        setTimeout(() => {
-            pulse();
-        }, delay);
+    // Live Pulse Logic via Backend Fetch
+    async function fetchStats() {
+        try {
+            const res = await fetch('/api/stats');
+            if (res.ok) {
+                const data = await res.json();
+                const newCount = data.forged_count;
+
+                if (newCount !== currentCount) {
+                    currentCount = newCount;
+                    updateDisplay(currentCount);
+
+                    // Speed up gear animation briefly
+                    gearIcon.classList.add('gear-fast');
+                    setTimeout(() => {
+                        gearIcon.classList.remove('gear-fast');
+                    }, 2000);
+                }
+            }
+        } catch (e) {
+            console.error("Stats fetch failed", e);
+        }
     }
 
-    function pulse() {
-        currentCount++;
-        updateDisplay(currentCount);
+    // Initial Fetch
+    fetchStats();
 
-        // Speed up gear
-        gearIcon.classList.add('gear-fast');
-        setTimeout(() => {
-            gearIcon.classList.remove('gear-fast');
-        }, 2000);
-
-        scheduleNextPulse();
-    }
-
-    // Start the loop
-    scheduleNextPulse();
+    // Poll every 60 seconds
+    setInterval(fetchStats, 60000);
 }
 
 // --- GOD MODE / ADMIN DASHBOARD LOGIC ---

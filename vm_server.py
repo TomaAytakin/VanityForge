@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from functools import wraps
+from utils.stats_engine import calculate_marketing_stats
 
 # 1. LOAD SECRETS
 load_dotenv()
@@ -143,6 +144,12 @@ def vvvip():
 
 @app.route('/faq')
 def faq(): return app.send_static_file('faq.html')
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """Returns the server-side calculated forged count."""
+    count = calculate_marketing_stats()
+    return jsonify({'forged_count': count})
 
 # --- RPC PROXY ---
 @app.route('/api/rpc', methods=['POST'])
