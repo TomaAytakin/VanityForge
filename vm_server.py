@@ -1030,4 +1030,5 @@ if __name__ == '__main__':
     # START THE TRAFFIC CONTROLLER THREAD
     t = threading.Thread(target=scheduler_loop, daemon=True)
     t.start()
-    app.run(host='127.0.0.1', port=8080)
+    # Binds to 0.0.0.0 to allow Google Global Load Balancer health checks
+    app.run(host='0.0.0.0', port=8080)
