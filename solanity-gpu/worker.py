@@ -5,6 +5,7 @@ import glob
 import sys
 import base58
 import logging
+import requests
 import google.cloud.logging
 from google.cloud.logging.handlers import CloudLoggingHandler
 import time
@@ -34,6 +35,27 @@ def generate_key_from_pin(pin, user_id):
     salt = get_deterministic_salt(user_id)
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
+
+def report_status(server_url, payload):
+    """Sends the result or error back to the server."""
+    if not server_url:
+        logging.error("SERVER_URL not set, cannot report status.")
+        return
+
+    try:
+        # Ensure url ends with /api/worker/complete or append it if it's just base url
+        # The env var is likely just the base url "https://vanityforge.org"
+        if not server_url.endswith('/api/worker/complete'):
+            endpoint = f"{server_url.rstrip('/')}/api/worker/complete"
+        else:
+            endpoint = server_url
+
+        logging.info(f"Reporting status to {endpoint}")
+        response = requests.post(endpoint, json=payload, timeout=10)
+        response.raise_for_status()
+        logging.info("Successfully reported status to server.")
+    except Exception as e:
+        logging.error(f"Failed to report status to server: {e}")
 
 def main():
     setup_logging()
@@ -83,6 +105,12 @@ def main():
             # Ignore unknown args or handle as needed
             i += 1
 
+    job_id = os.environ.get('TASK_JOB_ID')
+    server_url = os.environ.get('SERVER_URL')
+
+    if not job_id:
+        logging.warning("TASK_JOB_ID not set. Proceeding but callback might fail.")
+
     grind_args = []
     if prefix:
         grind_args.extend(["--starts-with", f"{prefix}:1"])
@@ -91,7 +119,7 @@ def main():
     else:
         error_msg = "No pattern provided (prefix or suffix required)"
         logging.error(error_msg)
-        print(json.dumps({"found": False, "error": error_msg}))
+        report_status(server_url, {"job_id": job_id, "error": error_msg})
         sys.exit(1)
 
     if case_sensitive == 'false':
@@ -118,6 +146,7 @@ def main():
         length = len(prefix) if prefix else len(suffix)
         hashrate_mhs = (58**length) / elapsed / 1_000_000
         logging.info(f"Hashrate: {hashrate_mhs:.1f} MH/s")
+        sys.stderr.write(f"Hashrate: {hashrate_mhs:.1f} MH/s\n")
 
         # Log stdout/stderr for debugging
         logging.info(f"Command stdout: {process.stdout}")
@@ -127,7 +156,7 @@ def main():
         if not json_files:
             error_msg = "Keypair file not generated"
             logging.error(error_msg)
-            print(json.dumps({"found": False, "error": error_msg}))
+            report_status(server_url, {"job_id": job_id, "error": error_msg})
             sys.exit(1)
 
         found_file = json_files[0]
@@ -149,10 +178,9 @@ def main():
         task_user_id = os.environ.get('TASK_USER_ID')
 
         if not task_pin or not task_user_id:
-            logging.error("V19 Security Error: Missing TASK_PIN or TASK_USER_ID env vars")
-            # We might choose to fail here, but let's try to proceed or fail safely.
-            # User instructions imply this is critical.
-            print(json.dumps({"found": False, "error": "Missing security credentials (PIN/User ID)"}))
+            error_msg = "V19 Security Error: Missing TASK_PIN or TASK_USER_ID env vars"
+            logging.error(error_msg)
+            report_status(server_url, {"job_id": job_id, "error": error_msg})
             sys.exit(1)
 
         # Encrypt
@@ -160,13 +188,13 @@ def main():
         encrypted_secret_key = Fernet(key).encrypt(private_key_b58.encode()).decode()
 
         result = {
-            "found": True,
+            "job_id": job_id,
             "public_key": public_key_b58,
             "secret_key": encrypted_secret_key
         }
 
-        # Print JSON to stdout for the caller to parse
-        print(json.dumps(result))
+        # Send Callback
+        report_status(server_url, result)
 
         # Clean up
         os.remove(found_file)
@@ -174,15 +202,15 @@ def main():
 
     except subprocess.CalledProcessError as e:
         logging.error(f"Subprocess error: {e.stderr}")
-        print(json.dumps({"found": False, "error": str(e)}))
+        report_status(server_url, {"job_id": job_id, "error": str(e)})
         sys.exit(1)
     except FileNotFoundError:
         logging.error("solana-keygen not found in PATH")
-        print(json.dumps({"found": False, "error": "solana-keygen executable not found"}))
+        report_status(server_url, {"job_id": job_id, "error": "solana-keygen executable not found"})
         sys.exit(1)
     except Exception as e:
         logging.exception("Unexpected error")
-        print(json.dumps({"found": False, "error": str(e)}))
+        report_status(server_url, {"job_id": job_id, "error": str(e)})
         sys.exit(1)
 
 if __name__ == "__main__":
