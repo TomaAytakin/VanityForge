@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
     curl python3 python3-pip bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
+# Alias Python
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
 WORKDIR /app
 
 # Install Python libraries
@@ -31,4 +34,4 @@ COPY worker.py .
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
-CMD ["python3", "worker.py"]
+ENTRYPOINT ["python3", "worker.py"]
