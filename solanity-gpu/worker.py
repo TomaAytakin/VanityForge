@@ -7,6 +7,12 @@ import base58
 import logging
 import google.cloud.logging
 from google.cloud.logging.handlers import CloudLoggingHandler
+import time
+import hashlib
+import base64
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 def setup_logging():
     """Sets up Google Cloud Logging if available, otherwise falls back to standard logging."""
@@ -20,6 +26,14 @@ def setup_logging():
         # Fallback to standard logging if credentials fail (e.g. local test)
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         logging.warning(f"Failed to setup Cloud Logging: {e}. using basic logging.")
+
+def get_deterministic_salt(user_id):
+    return hashlib.sha256(user_id.encode()).digest()
+
+def generate_key_from_pin(pin, user_id):
+    salt = get_deterministic_salt(user_id)
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000)
+    return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
 def main():
     setup_logging()
@@ -91,8 +105,19 @@ def main():
     logging.info(f"Running command: {command}")
 
     try:
+        start_time = time.time()
         # Run the grind
         process = subprocess.run(command, capture_output=True, text=True, check=True)
+        end_time = time.time()
+
+        elapsed = end_time - start_time
+        if elapsed <= 0: elapsed = 0.001 # Prevent division by zero
+
+        # Calculate Hashrate
+        # Length used is the length of the pattern (prefix or suffix)
+        length = len(prefix) if prefix else len(suffix)
+        hashrate_mhs = (58**length) / elapsed / 1_000_000
+        logging.info(f"Hashrate: {hashrate_mhs:.1f} MH/s")
 
         # Log stdout/stderr for debugging
         logging.info(f"Command stdout: {process.stdout}")
@@ -118,10 +143,26 @@ def main():
         public_key_bytes = private_key_bytes[32:]
         public_key_b58 = base58.b58encode(public_key_bytes).decode('utf-8')
 
+        # V19 Security Update: Internal Encryption
+        # Sync with Environment
+        task_pin = os.environ.get('TASK_PIN')
+        task_user_id = os.environ.get('TASK_USER_ID')
+
+        if not task_pin or not task_user_id:
+            logging.error("V19 Security Error: Missing TASK_PIN or TASK_USER_ID env vars")
+            # We might choose to fail here, but let's try to proceed or fail safely.
+            # User instructions imply this is critical.
+            print(json.dumps({"found": False, "error": "Missing security credentials (PIN/User ID)"}))
+            sys.exit(1)
+
+        # Encrypt
+        key = generate_key_from_pin(task_pin, task_user_id)
+        encrypted_secret_key = Fernet(key).encrypt(private_key_b58.encode()).decode()
+
         result = {
             "found": True,
             "public_key": public_key_b58,
-            "private_key": private_key_b58
+            "secret_key": encrypted_secret_key
         }
 
         # Print JSON to stdout for the caller to parse
