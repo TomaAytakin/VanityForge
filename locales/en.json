@@ -5,7 +5,8 @@
     "security": "Security",
     "roadmap": "Roadmap",
     "faq": "FAQ",
-    "godmode": "God Mode Active"
+    "godmode": "God Mode Active",
+    "welcome_dev": "Welcome Dev 🛠️"
   },
   "stats": {
     "forged": "Vanity Identities Forged",
@@ -19,5 +20,64 @@
     "feature2_desc": "Before your key leaves the generation container, it is encrypted using <span class=\"font-mono text-xs bg-black/30 p-1 rounded\">Fernet (AES-128-CBC)</span> with a key derived from your <span class=\"text-white font-bold\">Personal Vault PIN</span> using <span class=\"font-mono text-xs bg-black/30 p-1 rounded\">PBKDF2-HMAC-SHA256</span> (100,000 iterations). We do not store your PIN. Without it, the stored encrypted blob is mathematically impossible to decrypt.",
     "feature3_title": "Radical Transparency",
     "feature3_desc": "Our codebase is open source. The entire generation pipeline, from the Numpad UI to the Rust-based GPU grinder, is verifiable on GitHub. You verify the code, you trust the math."
+  },
+  "form": {
+    "title": "Request New Vanity Address",
+    "prefix": "Prefix (Starts with)",
+    "suffix": "Suffix (Ends with)",
+    "prefix_placeholder": "e.g. CAFE",
+    "suffix_placeholder": "e.g. 888",
+    "referral_code": "Referral Code (Optional)",
+    "referral_placeholder": "CODE",
+    "check": "Check",
+    "note": "Note: Characters 0, O, I, and l are not allowed by Solana for security reasons.",
+    "case_sensitive": "Case Sensitive",
+    "email_notify": "Email me when done",
+    "compute_method": "Compute Method",
+    "cpu_option": "CPU (Stable)",
+    "gpu_option": "GPU (Updating...)",
+    "gpu_warning": "⚠️ GPU Worker Cluster is currently updating. Please use CPU.",
+    "difficulty": "Difficulty",
+    "est_time": "Est. Time",
+    "cost": "Cost",
+    "length": "Length",
+    "time_header": "Time (300 MH/s)",
+    "legal": "I understand that VanityForge is non-custodial and that <span class=\"text-white font-bold\">losing my PIN means I lose my address forever</span>.",
+    "forge_btn": "Forge",
+    "initializing": "Initializing RedPanda Engine...",
+    "confirming": "Confirming Payment..."
+  },
+  "table": {
+    "target": "Target",
+    "status": "Status",
+    "details": "Details / Key",
+    "public_key": "Public Key",
+    "private_key": "Private Key",
+    "need_help": "Need Help?",
+    "stuck": "Stuck?",
+    "no_jobs": "No active jobs found.",
+    "your_jobs": "Your Jobs"
+  },
+  "status": {
+    "completed": "COMPLETED",
+    "queued": "QUEUED",
+    "running": "RUNNING",
+    "failed": "FAILED"
+  },
+  "numpad": {
+    "title": "Enter Vault PIN",
+    "warning": "Warning:",
+    "warning_text": "You are about to create a permanent encryption PIN. VanityForge does not store this PIN. If you lose it, you will permanently lose the capability to reveal your private keys or forge new wallets within your VanityForge account. We cannot recover it for you.",
+    "acknowledge": "I acknowledge that VanityForge cannot recover my PIN if lost, and that losing my PIN means I will be unable to reveal my private keys or access my VanityForge account functions.",
+    "cancel": "Cancel"
+  },
+  "beta": {
+    "title": "Beta Access Unlocked!",
+    "desc": "You've received a <span class=\"text-purple-400 font-bold\">50% Discount</span> on all vanity address generations during our Beta phase.",
+    "btn": "Let's Forge!"
+  },
+  "referral": {
+      "withdraw_placeholder": "Target Wallet Address",
+      "amount_placeholder": "Amount (Min 0.1 SOL)"
   }
 }

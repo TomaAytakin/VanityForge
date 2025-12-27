@@ -5,7 +5,8 @@
     "security": "安全与技术",
     "roadmap": "路线图",
     "faq": "常见问题",
-    "godmode": "上帝模式已激活"
+    "godmode": "上帝模式已激活",
+    "welcome_dev": "欢迎开发者 🛠️"
   },
   "stats": {
     "forged": "已锻造的靓号总数",
@@ -19,5 +20,64 @@
     "feature2_desc": "在私钥离开服务器之前，我们会使用您的个人 PIN 码进行加密。我们采用 PBKDF2HMAC 算法，配合 100,000 次哈希迭代，确保只有您能解密您的私钥。",
     "feature3_title": "零知识存储",
     "feature3_desc": "VanityForge 永远无法查看您的私钥。我们的数据库仅存储加密后的密文。即使服务器被入侵，没有您的 PIN 码，任何人也无法解密您的资产。"
+  },
+  "form": {
+    "title": "申请新的靓号地址",
+    "prefix": "前缀 (以...开头)",
+    "suffix": "后缀 (以...结尾)",
+    "prefix_placeholder": "8888",
+    "suffix_placeholder": "666",
+    "referral_code": "推荐码 (可选)",
+    "referral_placeholder": "CODE",
+    "check": "检查",
+    "note": "注意：出于安全原因，Solana 不允许使用字符 0、O、I 和 l。",
+    "case_sensitive": "区分大小写",
+    "email_notify": "完成后邮件通知我",
+    "compute_method": "计算方式",
+    "cpu_option": "CPU (稳定)",
+    "gpu_option": "GPU (升级中...)",
+    "gpu_warning": "⚠️ GPU 工作集群目前正在升级。请使用 CPU。",
+    "difficulty": "难度",
+    "est_time": "预估时间",
+    "cost": "费用",
+    "length": "长度",
+    "time_header": "时间 (300 MH/s)",
+    "legal": "我明白 VanityForge 是非托管的，<span class=\"text-white font-bold\">丢失 PIN 码意味着我将永远失去我的地址</span>。",
+    "forge_btn": "开始锻造",
+    "initializing": "正在初始化 RedPanda 引擎...",
+    "confirming": "正在确认支付..."
+  },
+  "table": {
+    "target": "目标",
+    "status": "状态",
+    "details": "详情 / 密钥",
+    "public_key": "公钥",
+    "private_key": "私钥",
+    "need_help": "需要帮助?",
+    "stuck": "卡住了?",
+    "no_jobs": "暂无活动任务。",
+    "your_jobs": "您的任务"
+  },
+  "status": {
+    "completed": "已完成",
+    "queued": "排队中",
+    "running": "进行中",
+    "failed": "失败"
+  },
+  "numpad": {
+    "title": "输入保险柜 PIN",
+    "warning": "警告：",
+    "warning_text": "您即将创建一个永久加密 PIN。VanityForge 不会存储此 PIN。如果您丢失了它，您将永久失去显示私钥或在 VanityForge 账户中锻造新钱包的能力。我们要无法为您恢复它。",
+    "acknowledge": "我确认 VanityForge 无法找回我丢失的 PIN，并且丢失 PIN 意味着我将无法显示我的私钥或访问我的 VanityForge 账户功能。",
+    "cancel": "取消"
+  },
+  "beta": {
+    "title": "测试版权限已解锁！",
+    "desc": "您已获得测试阶段所有靓号生成的 <span class=\"text-purple-400 font-bold\">50% 折扣</span>。",
+    "btn": "开始锻造！"
+  },
+  "referral": {
+      "withdraw_placeholder": "目标钱包地址",
+      "amount_placeholder": "金额 (最少 0.1 SOL)"
   }
 }

@@ -114,18 +114,23 @@
         .pin-dot.active {
             background-color: #9333ea; box-shadow: 0 0 8px #9333ea;
         }
-        .font-cn { font-family: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif !important; }
+        .font-cn { font-family: 'PingFang SC', 'Microsoft YaHei', 'Source Han Sans CN', 'Segoe UI', sans-serif !important; }
         .font-en { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center px-4">
 
-    <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50">
+    <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50 bg-gradient-to-r from-gray-900 to-gray-800">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center">
-                    <div class="flex-shrink-0">
+                    <div class="flex-shrink-0 flex items-center gap-3">
                         <span class="text-purple-500 font-bold text-xl tracking-wider uppercase"><i class="fa-solid fa-fire-flame-curved"></i> VanityForge</span>
+                        <!-- Admin Info Container -->
+                        <div id="admin-info-container" class="flex items-center gap-2">
+                             <a href="#" onclick="toggleAdminDashboard(); return false;" id="nav-dev" class="hidden nav-item text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-2 py-1 rounded-md text-xs font-bold transition-colors animate-pulse"><i class="fa-solid fa-bolt"></i> <span data-i18n="nav.welcome_dev">DEV</span></a>
+                             <!-- God Mode Badge Injected Here -->
+                        </div>
                     </div>
                     <div class="hidden md:block">
                         <div class="ml-10 flex items-baseline space-x-4">
@@ -135,9 +140,13 @@
                             <a href="#" onclick="openSecurityModal(); return false;" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-solid fa-shield-halved"></i> <span data-i18n="nav.security">Security</span></a>
                             <a href="/roadmap" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><span data-i18n="nav.roadmap">Roadmap</span></a>
                             <a href="/faq" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><span data-i18n="nav.faq">FAQ</span></a>
-                            <a href="https://x.com/vanityforgeX" target="_blank" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-x-twitter"></i></a>
-                            <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i> GitHub</a>
-                            <a href="#" onclick="toggleAdminDashboard(); return false;" id="nav-dev" class="hidden nav-item text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-3 py-2 rounded-md text-sm font-bold transition-colors animate-pulse"><i class="fa-solid fa-bolt"></i> DEV</a>
+
+                            <!-- Social Group -->
+                            <div class="flex items-center gap-1 bg-gray-800/50 rounded-lg p-1 border border-gray-700/50">
+                                <a href="https://x.com/vanityforgeX" target="_blank" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-x-twitter"></i></a>
+                                <a href="https://github.com/TomaAytakin/VanityForge" target="_blank" class="nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors"><i class="fa-brands fa-github"></i></a>
+                            </div>
+
                             <button id="lang-toggle" onclick="I18n.toggle()" class="ml-4 nav-item text-gray-300 hover:text-white hover:bg-gray-700/50 px-3 py-2 rounded-md text-sm font-medium transition-colors border border-gray-600">EN / 中文</button>
                         </div>
                     </div>
@@ -315,33 +324,33 @@
                 <i class="fa-solid fa-code text-6xl text-purple-500"></i>
             </div>
             <h2 class="text-xl font-bold mb-4 text-purple-400 flex items-center gap-2">
-                <i class="fa-solid fa-plus-circle"></i> Request New Vanity Address
+                <i class="fa-solid fa-plus-circle"></i> <span data-i18n="form.title">Request New Vanity Address</span>
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
-                    <label class="block text-sm text-gray-400 mb-1">Prefix (Starts with)</label>
-                    <input type="text" id="prefix" class="w-full bg-gray-800 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. CAFE">
+                    <label class="block text-sm text-gray-400 mb-1" data-i18n="form.prefix">Prefix (Starts with)</label>
+                    <input type="text" id="prefix" class="w-full bg-gray-800 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. CAFE" data-i18n-placeholder="form.prefix_placeholder">
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-400 mb-1">Suffix (Ends with)</label>
-                    <input type="text" id="suffix" class="w-full bg-gray-800 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. 888">
+                    <label class="block text-sm text-gray-400 mb-1" data-i18n="form.suffix">Suffix (Ends with)</label>
+                    <input type="text" id="suffix" class="w-full bg-gray-800 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600" placeholder="e.g. 888" data-i18n-placeholder="form.suffix_placeholder">
                 </div>
             </div>
 
             <!-- Referral Code Input -->
             <div class="mb-4">
-                 <label class="block text-sm text-gray-400 mb-1">Referral Code (Optional)</label>
+                 <label class="block text-sm text-gray-400 mb-1" data-i18n="form.referral_code">Referral Code (Optional)</label>
                  <div class="flex gap-2">
-                     <input type="text" id="referral-code-input" maxlength="4" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600 uppercase" placeholder="CODE">
-                     <button onclick="checkReferralCode()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 rounded border border-gray-600 transition" type="button">
+                     <input type="text" id="referral-code-input" maxlength="4" class="w-full bg-gray-800 border border-gray-700 rounded p-2 focus:border-purple-500 focus:outline-none text-white font-mono placeholder-gray-600 uppercase" placeholder="CODE" data-i18n-placeholder="form.referral_placeholder">
+                     <button onclick="checkReferralCode()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 rounded border border-gray-600 transition" type="button" data-i18n="form.check">
                          Check
                      </button>
                  </div>
                  <p id="referral-status-msg" class="text-xs mt-1 hidden"></p>
             </div>
 
-            <p class="text-xs text-gray-500 mb-4">Note: Characters 0, O, I, and l are not allowed by Solana for security reasons.</p>
+            <p class="text-xs text-gray-500 mb-4" data-i18n="form.note">Note: Characters 0, O, I, and l are not allowed by Solana for security reasons.</p>
 
             <div class="flex flex-col gap-3 mb-4">
                 <div class="flex items-center gap-2">
@@ -349,27 +358,27 @@
                         <input type="checkbox" name="toggle" id="case-sensitive" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
                         <label for="case-sensitive" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-700 cursor-pointer"></label>
                     </div>
-                    <label for="case-sensitive" class="text-sm text-gray-300 cursor-pointer select-none">Case Sensitive</label>
+                    <label for="case-sensitive" class="text-sm text-gray-300 cursor-pointer select-none" data-i18n="form.case_sensitive">Case Sensitive</label>
 
                     <div class="ml-auto flex items-center gap-2">
                         <input type="checkbox" id="email-notify" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
-                        <label for="email-notify" class="text-sm text-gray-300 cursor-pointer select-none">Email me when done</label>
+                        <label for="email-notify" class="text-sm text-gray-300 cursor-pointer select-none" data-i18n="form.email_notify">Email me when done</label>
                     </div>
                 </div>
 
                 <div class="mb-4">
-                  <label class="block text-gray-400 text-sm font-bold mb-2">Compute Method</label>
+                  <label class="block text-gray-400 text-sm font-bold mb-2" data-i18n="form.compute_method">Compute Method</label>
                   <div class="flex space-x-4">
                     <label class="inline-flex items-center">
                       <input type="radio" name="compute_method" value="cpu" checked class="form-radio text-purple-500">
-                      <span class="ml-2 text-white">CPU (Stable)</span>
+                      <span class="ml-2 text-white" data-i18n="form.cpu_option">CPU (Stable)</span>
                     </label>
                     <label class="inline-flex items-center">
                       <input type="radio" name="compute_method" value="gpu" class="form-radio text-purple-500">
-                      <span class="ml-2 text-white">GPU (Updating...)</span>
+                      <span class="ml-2 text-white" data-i18n="form.gpu_option">GPU (Updating...)</span>
                     </label>
                   </div>
-                  <div id="gpu-warning" class="hidden mt-2 p-2 bg-yellow-600 text-white rounded text-sm">
+                  <div id="gpu-warning" class="hidden mt-2 p-2 bg-yellow-600 text-white rounded text-sm" data-i18n="form.gpu_warning">
                     ⚠️ GPU Worker Cluster is currently updating. Please use CPU.
                   </div>
                 </div>
@@ -393,23 +402,23 @@
 
             <div class="bg-gray-800/50 rounded-lg p-4 mb-6 text-sm border border-gray-700">
                 <div class="flex justify-between items-center mb-2">
-                    <span class="text-gray-400">Difficulty:</span>
+                    <span class="text-gray-400" data-i18n="form.difficulty">Difficulty:</span>
                     <span id="calc-difficulty" class="text-white font-bold">0 chars</span>
                 </div>
                 <div class="flex justify-between items-center mb-2">
-                    <span class="text-gray-400">Est. Time:</span>
+                    <span class="text-gray-400" data-i18n="form.est_time">Est. Time:</span>
                     <span id="calc-time" class="text-white font-mono">Instant</span>
                 </div>
                 <div class="flex justify-between items-center pt-2 border-t border-gray-700">
-                    <span class="text-gray-400">Cost:</span>
+                    <span class="text-gray-400" data-i18n="form.cost">Cost:</span>
                     <span id="calc-cost" class="text-green-400 font-bold font-mono">0 Credits</span>
                 </div>
 
                 <table class="w-full mt-4 border-t border-gray-700 pt-2 text-xs">
                     <thead>
                         <tr class="text-gray-500 uppercase tracking-wider">
-                            <th class="text-left pb-1">Length</th>
-                            <th class="text-right pb-1">Time (300 MH/s)</th>
+                            <th class="text-left pb-1" data-i18n="form.length">Length</th>
+                            <th class="text-right pb-1" data-i18n="form.time_header">Time (300 MH/s)</th>
                         </tr>
                     </thead>
                     <tbody class="text-gray-300 font-mono">
@@ -431,13 +440,13 @@
 
             <div class="mb-6 bg-purple-900/20 p-3 rounded border border-purple-500/30 flex items-start gap-3">
                 <input type="checkbox" id="legal-checkbox" class="mt-1 w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2">
-                <label for="legal-checkbox" class="text-xs text-gray-300 leading-tight cursor-pointer">
+                <label for="legal-checkbox" class="text-xs text-gray-300 leading-tight cursor-pointer" data-i18n="form.legal">
                     I understand that VanityForge is non-custodial and that <span class="text-white font-bold">losing my PIN means I lose my address forever</span>.
                 </label>
             </div>
 
             <button onclick="startSubmissionFlow()" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-4 rounded-lg shadow-lg transition transform hover:scale-[1.01] active:scale-[0.99] flex justify-center items-center gap-2">
-                <i class="fa-solid fa-rocket"></i> Forge
+                <i class="fa-solid fa-rocket"></i> <span data-i18n="form.forge_btn">Forge</span>
             </button>
             <p id="submit-error" class="text-red-400 text-sm mt-3 text-center hidden bg-red-900/20 py-2 rounded border border-red-900/50"></p>
         </div> <!-- End of forge-section -->
@@ -445,7 +454,7 @@
         <!-- Job Queue Section -->
         <div id="job-queue-section" class="glass-panel p-8 rounded-xl shadow-lg hidden">
             <h3 class="text-lg font-bold mb-4 text-gray-300 border-b border-gray-700 pb-2 flex items-center justify-between">
-                <span><i class="fa-solid fa-list-ul mr-2 text-purple-500"></i>Your Jobs</span>
+                <span><i class="fa-solid fa-list-ul mr-2 text-purple-500"></i><span data-i18n="table.your_jobs">Your Jobs</span></span>
                 <div class="flex items-center gap-3">
                     <span class="text-xs font-normal text-gray-500" id="user-id-display"></span>
                     <button onclick="logout()" class="text-xs text-red-400 hover:text-red-300 transition-colors" title="Logout">
@@ -459,16 +468,16 @@
                     <thead>
                         <tr class="text-gray-400 border-b border-gray-700 text-xs uppercase tracking-wider">
                              <!-- Fixed Column Widths -->
-                             <th class="py-3 font-medium text-gray-500" style="width: 25%;">Target</th>
-                             <th class="py-3 font-medium text-gray-500" style="width: 20%;">Status</th>
-                             <th class="py-3 font-medium text-gray-500" style="width: 55%;">Details / Key</th>
+                             <th class="py-3 font-medium text-gray-500" style="width: 25%;" data-i18n="table.target">Target</th>
+                             <th class="py-3 font-medium text-gray-500" style="width: 20%;" data-i18n="table.status">Status</th>
+                             <th class="py-3 font-medium text-gray-500" style="width: 55%;" data-i18n="table.details">Details / Key</th>
                         </tr>
                     </thead>
                     <tbody id="jobs-container" class="text-sm divide-y divide-gray-800">
                         <!-- Rows injected here -->
                     </tbody>
                 </table>
-                <div id="jobs-empty-state" class="text-center text-gray-500 italic py-8 hidden">No active jobs found.</div>
+                <div id="jobs-empty-state" class="text-center text-gray-500 italic py-8 hidden" data-i18n="table.no_jobs">No active jobs found.</div>
             </div>
         </div>
     </div>
@@ -1128,15 +1137,22 @@
 
             // God Mode Check
             if (ADMIN_EMAILS.includes(currentUserEmail)) {
-                const titleSpan = document.querySelector('nav .text-purple-500');
-                if (titleSpan) {
-                    titleSpan.innerHTML = '<i class="fa-solid fa-fire-flame-curved"></i> Welcome Dev 🛠️';
+                // Update text to "Welcome Dev" if not already set (rely on I18n but allow override)
+                // But better to move this into the Admin Info Container
+                const adminContainer = document.getElementById('admin-info-container');
+                if (adminContainer) {
+                     const devLink = document.getElementById('nav-dev');
+                     if(devLink) devLink.classList.remove('hidden');
+
+                     // Create Badge if not exists
+                     if (!document.getElementById('god-mode-badge')) {
+                        const godModeBadge = document.createElement('span');
+                        godModeBadge.className = "bg-yellow-500/20 text-yellow-400 text-xs font-bold px-2 py-1 rounded border border-yellow-500/50 animate-pulse";
+                        godModeBadge.innerText = typeof I18n !== 'undefined' ? I18n.t('nav.godmode') : "God Mode Active";
+                        godModeBadge.id = "god-mode-badge";
+                        adminContainer.appendChild(godModeBadge);
+                     }
                 }
-                const godModeBadge = document.createElement('span');
-                godModeBadge.className = "ml-4 bg-yellow-500/20 text-yellow-400 text-xs font-bold px-2 py-1 rounded border border-yellow-500/50 animate-pulse";
-                godModeBadge.innerText = typeof I18n !== 'undefined' ? I18n.t('nav.godmode') : "God Mode Active";
-                godModeBadge.id = "god-mode-badge";
-                titleSpan.appendChild(godModeBadge);
             }
 
             // Show Beta Modal
@@ -1365,7 +1381,7 @@
             else basePrice = 5.00;
 
             // No GPU Surcharge
-            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing RedPanda Engine...';
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ' + (typeof I18n !== 'undefined' ? I18n.t('form.initializing') : 'Initializing RedPanda Engine...');
 
             // Apply 50% Discount
             let cost = basePrice * 0.5;
@@ -1418,7 +1434,7 @@
                      transactionSignature = signature;
 
                      // 4. Wait for Confirmation
-                     submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Confirming Payment...';
+                     submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ' + (typeof I18n !== 'undefined' ? I18n.t('form.confirming') : 'Confirming Payment...');
                      await connection.confirmTransaction({
                          signature: signature,
                          blockhash: blockhash,
@@ -1470,7 +1486,7 @@
                 errorEl.classList.remove('hidden');
             } finally {
                 submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Forge';
+                submitBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> ' + (typeof I18n !== 'undefined' ? I18n.t('form.forge_btn') : 'Forge');
             }
         }
 
@@ -1504,6 +1520,11 @@
                         let statusIcon = '';
                         let resultHtml = '';
 
+                        let localizedStatus = status;
+                        if (typeof I18n !== 'undefined') {
+                            localizedStatus = I18n.t('status.' + status.toLowerCase());
+                        }
+
                         if (status === 'COMPLETED') {
                             statusColor = 'text-green-400';
                             statusIcon = '<i class="fa-solid fa-check-circle"></i>';
@@ -1512,13 +1533,13 @@
                             resultHtml = `
                                 <div class="mt-2 bg-gray-900/50 p-2 rounded border border-gray-700/50">
                                     <div class="flex justify-between items-center mb-1">
-                                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Public Key</span>
+                                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">${typeof I18n !== 'undefined' ? I18n.t('table.public_key') : 'Public Key'}</span>
                                         <button onclick="copyToClipboard('${job.public_key}')" class="text-xs text-purple-400 hover:text-purple-300 transition-colors" title="Copy Public Key"><i class="fa-regular fa-copy"></i></button>
                                     </div>
                                     <div class="font-mono text-[10px] break-all text-gray-300 mb-2 bg-black/20 p-1 rounded">${job.public_key}</div>
 
                                     <div class="flex justify-between items-center mb-1">
-                                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Private Key</span>
+                                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">${typeof I18n !== 'undefined' ? I18n.t('table.private_key') : 'Private Key'}</span>
                                         <button onclick="openNumpad('reveal', 'Enter PIN to Unlock', revealKey, '${doc.id}')" id="btn-${doc.id}" class="text-xs text-purple-400 hover:text-purple-300 transition-colors uppercase font-bold" title="Reveal Private Key"><i class="fa-regular fa-eye"></i></button>
                                     </div>
                                     <div id="secret-${doc.id}" class="hidden flex items-start gap-2 animate-fade-in">
@@ -1536,7 +1557,7 @@
                                     ${escapeHtml(job.error || "Job failed.")}
                                 </div>
                                 <div class="mt-2 text-[10px]">
-                                    <a href="#" onclick="openRefundModal(); return false;" class="text-gray-500 hover:text-gray-300 underline"><i class="fa-solid fa-life-ring mr-1"></i>Need Help?</a>
+                                    <a href="#" onclick="openRefundModal(); return false;" class="text-gray-500 hover:text-gray-300 underline"><i class="fa-solid fa-life-ring mr-1"></i>${typeof I18n !== 'undefined' ? I18n.t('table.need_help') : 'Need Help?'}</a>
                                 </div>
                             `;
                         } else {
@@ -1544,7 +1565,7 @@
                             statusIcon = '<i class="fa-regular fa-clock animate-spin"></i>';
                              resultHtml = `
                                 <div class="mt-2 text-[10px]">
-                                    <a href="#" onclick="openRefundModal(); return false;" class="text-gray-500 hover:text-gray-300 underline"><i class="fa-solid fa-life-ring mr-1"></i>Stuck?</a>
+                                    <a href="#" onclick="openRefundModal(); return false;" class="text-gray-500 hover:text-gray-300 underline"><i class="fa-solid fa-life-ring mr-1"></i>${typeof I18n !== 'undefined' ? I18n.t('table.stuck') : 'Stuck?'}</a>
                                 </div>
                             `;
                         }
@@ -1563,7 +1584,7 @@
                             </td>
                             <td class="py-3 pr-2 border-b border-gray-800">
                                 <span class="text-xs font-bold ${statusColor} capitalize flex items-center gap-1">
-                                    ${statusIcon} ${job.status}
+                                    ${statusIcon} ${localizedStatus}
                                 </span>
                             </td>
                             <td class="py-3 border-b border-gray-800">
