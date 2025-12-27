@@ -4,15 +4,15 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Python, Pip, and dependencies
-# We need 'base58' to format the private key for the user
 RUN apt-get update && apt-get install -y \
     curl python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the 'base58' library for Python (crucial for formatting)
-RUN pip3 install base58
-
 WORKDIR /app
+
+# Install Python libraries
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install Official Solana CLI (Stable Release)
 RUN sh -c "$(curl -sSfL https://release.solana.com/v1.18.4/install)"
