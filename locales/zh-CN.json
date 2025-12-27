@@ -1,0 +1,23 @@
+{
+  "nav": {
+    "forge": "锻造",
+    "referrals": "推荐奖励",
+    "security": "安全与技术",
+    "roadmap": "路线图",
+    "faq": "常见问题",
+    "godmode": "上帝模式已激活"
+  },
+  "stats": {
+    "forged": "已锻造的靓号总数",
+    "cluster": "300 MH/S 算力集群"
+  },
+  "security": {
+    "title": "全非托管承诺",
+    "feature1_title": "临时生成",
+    "feature1_desc": "您的靓号是在隔离的 Google Cloud 容器中生成的。私钥仅在容器的随机存取存储器 (RAM) 中存在不到一秒钟。一旦锻造完成，容器将立即销毁，彻底抹除所有原始数据。",
+    "feature2_title": "基于 PIN 的加密 (PBKDF2 + Fernet)",
+    "feature2_desc": "在私钥离开服务器之前，我们会使用您的个人 PIN 码进行加密。我们采用 PBKDF2HMAC 算法，配合 100,000 次哈希迭代，确保只有您能解密您的私钥。",
+    "feature3_title": "零知识存储",
+    "feature3_desc": "VanityForge 永远无法查看您的私钥。我们的数据库仅存储加密后的密文。即使服务器被入侵，没有您的 PIN 码，任何人也无法解密您的资产。"
+  }
+}

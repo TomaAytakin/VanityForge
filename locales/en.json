@@ -1,0 +1,23 @@
+{
+  "nav": {
+    "forge": "Forge",
+    "referrals": "Referrals",
+    "security": "Security",
+    "roadmap": "Roadmap",
+    "faq": "FAQ",
+    "godmode": "God Mode Active"
+  },
+  "stats": {
+    "forged": "Vanity Identities Forged",
+    "cluster": "300 MH/S CLUSTER: The Fastest Custom Solana Key Generator"
+  },
+  "security": {
+    "title": "Zero-Custodial Security",
+    "feature1_title": "Ephemeral RAM Processing",
+    "feature1_desc": "VanityForge utilizes a stateless architecture. Private keys are generated in volatile RAM within secure, isolated containers. Once the vanity address is found, it is immediately encrypted. The raw private key <span class=\"text-white font-bold\">never touches a hard drive or database</span> in its unencrypted form.",
+    "feature2_title": "Client-Side PIN Encryption",
+    "feature2_desc": "Before your key leaves the generation container, it is encrypted using <span class=\"font-mono text-xs bg-black/30 p-1 rounded\">Fernet (AES-128-CBC)</span> with a key derived from your <span class=\"text-white font-bold\">Personal Vault PIN</span> using <span class=\"font-mono text-xs bg-black/30 p-1 rounded\">PBKDF2-HMAC-SHA256</span> (100,000 iterations). We do not store your PIN. Without it, the stored encrypted blob is mathematically impossible to decrypt.",
+    "feature3_title": "Radical Transparency",
+    "feature3_desc": "Our codebase is open source. The entire generation pipeline, from the Numpad UI to the Rust-based GPU grinder, is verifiable on GitHub. You verify the code, you trust the math."
+  }
+}
