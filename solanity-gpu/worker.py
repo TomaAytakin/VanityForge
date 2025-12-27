@@ -83,8 +83,8 @@ def main():
     if case_sensitive == 'false':
         grind_args.append("--ignore-case")
 
-    # Use solana-keygen from PATH (installed in Dockerfile)
-    solana_keygen_cmd = "solana-keygen"
+    # Use solana-keygen from /usr/local/bin/ (installed in Dockerfile)
+    solana_keygen_cmd = "/usr/local/bin/solana-keygen"
 
     command = [solana_keygen_cmd, "grind"] + grind_args
 

@@ -19,10 +19,10 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install Official Solana CLI (Stable Release)
 # Using direct download to avoid pipe errors
-RUN curl -L https://github.com/solana-labs/solana/releases/download/v1.18.4/solana-release-x86_64-unknown-linux-gnu.tar.bz2 | tar jx -C /root
-
-# Add Solana binaries to PATH
-ENV PATH="/root/solana-release/bin:${PATH}"
+RUN curl -L https://github.com/solana-labs/solana/releases/download/v1.18.4/solana-release-x86_64-unknown-linux-gnu.tar.bz2 | tar jx -C /tmp && \
+    mv /tmp/solana-release/bin/solana-keygen /usr/local/bin/solana-keygen && \
+    rm -rf /tmp/solana-release && \
+    solana-keygen --version
 
 # Copy the worker script
 COPY worker.py .
