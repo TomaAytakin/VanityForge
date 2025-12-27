@@ -58,7 +58,7 @@ ADMIN_EMAILS = set(os.getenv('ADMIN_EMAILS', "tomaaytakin@gmail.com,admin@vanity
 MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
-REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', "projects/vanityforge/locations/us-central1/jobs/vanity-gpu-redpanda")
+REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', "projects/vanityforge/locations/us-central1/jobs/cpu-redpanda")
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -254,11 +254,23 @@ def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
 
         min_limit, max_limit = calculate_top64_range(prefix)
 
+        # Build Arguments List (Correct Format: ["--prefix", "val", "--suffix", "val"])
+        args = []
+        if prefix:
+            args.extend(["--prefix", prefix])
+        if suffix:
+            args.extend(["--suffix", suffix])
+
+        # CPU Grinder expects string "true" for bool flag based on logic
+        if case_sensitive:
+            args.extend(["--case-sensitive", "true"])
+
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(
             name=target_job,
             overrides={
                 "container_overrides": [{
+                    "args": args,
                     "env": [
                         {"name": "TASK_JOB_ID", "value": job_id},
                         {"name": "TASK_PREFIX", "value": prefix or ""},
