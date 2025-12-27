@@ -32,7 +32,31 @@ function initLiveActivityCounter() {
 
     function updateDisplay(count) {
         // Format with commas
-        counterElement.innerText = count.toLocaleString();
+        const start = parseInt(counterElement.innerText.replace(/,/g, '')) || 0;
+        const end = count;
+        if (start === end) return;
+
+        // Simple odometer animation
+        const duration = 1000;
+        const startTime = performance.now();
+
+        function animate(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            // Ease out
+            const ease = 1 - Math.pow(1 - progress, 3);
+
+            const current = Math.floor(start + (end - start) * ease);
+            counterElement.innerText = current.toLocaleString();
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                counterElement.innerText = end.toLocaleString();
+            }
+        }
+
+        requestAnimationFrame(animate);
     }
 
     // Initial display
