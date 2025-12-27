@@ -268,6 +268,23 @@
                     </div>
                 </div>
 
+                <div class="mb-4">
+                  <label class="block text-gray-400 text-sm font-bold mb-2">Compute Method</label>
+                  <div class="flex space-x-4">
+                    <label class="inline-flex items-center">
+                      <input type="radio" name="compute_method" value="cpu" checked class="form-radio text-purple-500">
+                      <span class="ml-2 text-white">CPU (Stable)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                      <input type="radio" name="compute_method" value="gpu" class="form-radio text-purple-500">
+                      <span class="ml-2 text-white">GPU (Updating...)</span>
+                    </label>
+                  </div>
+                  <div id="gpu-warning" class="hidden mt-2 p-2 bg-yellow-600 text-white rounded text-sm">
+                    ⚠️ GPU Worker Cluster is currently updating. Please use CPU.
+                  </div>
+                </div>
+
                 <!-- GPU Option Removed: Now Default -->
                 <div class="hidden flex items-center gap-2 p-2 bg-purple-900/20 rounded border border-purple-500/30">
                      <input type="checkbox" id="use-gpu" class="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2" checked disabled>
@@ -1023,6 +1040,26 @@
                 if (val !== clean) e.target.value = clean;
                 updateEstimates();
             });
+        });
+
+        const computeRadios = document.querySelectorAll('input[name="compute_method"]');
+        const gpuWarning = document.getElementById('gpu-warning');
+        // We target the Forge button. It calls startSubmissionFlow()
+        // It's the button with that onclick handler.
+        const forgeBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
+
+        computeRadios.forEach(radio => {
+          radio.addEventListener('change', (e) => {
+            if (e.target.value === 'gpu') {
+              gpuWarning.classList.remove('hidden');
+              forgeBtn.disabled = true;
+              forgeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+              gpuWarning.classList.add('hidden');
+              forgeBtn.disabled = false;
+              forgeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+          });
         });
 
         // document.getElementById('use-gpu').addEventListener('change', updateEstimates);
