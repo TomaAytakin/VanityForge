@@ -136,16 +136,10 @@ async function checkAdmin() {
         const data = await res.json();
 
         if (data.isAdmin) {
-            // 2. Inject Navbar Item
-            const navContainer = document.querySelector('nav .md\\:block .ml-10');
-            if (navContainer && !document.getElementById('nav-dev')) {
-                const devBtn = document.createElement('a');
-                devBtn.href = "#";
-                devBtn.id = "nav-dev";
-                devBtn.onclick = (e) => { e.preventDefault(); toggleAdminDashboard(); };
-                devBtn.className = "text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-3 py-2 rounded-md text-sm font-bold transition-colors animate-pulse";
-                devBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> DEV';
-                navContainer.appendChild(devBtn);
+            // 2. Show Navbar Item
+            const devBtn = document.getElementById('nav-dev');
+            if (devBtn) {
+                devBtn.classList.remove('hidden');
             }
 
             // Bind to "GOD MODE ACTIVE" text if present (for mobile/alternate access)

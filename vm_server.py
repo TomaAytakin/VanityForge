@@ -151,7 +151,7 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not is_admin_session():
-            return jsonify({'error': 'Unauthorized'}), 401
+            return jsonify({'error': 'Forbidden'}), 403
         return f(*args, **kwargs)
     return decorated_function
 
