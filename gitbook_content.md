@@ -43,7 +43,7 @@ Once submitted, your job moves through the following statuses in the `vanity_job
 
 1.  **QUEUED:** The job has been accepted by the API and is waiting in the `vanity_jobs` database. The `scheduler_loop` checks this queue every 5 seconds.
 2.  **RUNNING:**
-    *   **RedPanda Engine:** Dispatched to the **Titanium GPU Cluster** (Cloud Run). The system updates the status to RUNNING only after successfully dispatching the container.
+    *   **RedPanda Engine:** Dispatched to the **CPU Worker Cluster** (Cloud Run). The system updates the status to RUNNING only after successfully dispatching the container.
 3.  **COMPLETED:** The vanity address was found! The private key has been encrypted with your PIN-derived key and saved. An email notification (if enabled) is sent.
 4.  **FAILED:** The job encountered an error (e.g., Cloud Dispatch failure, process crash). The specific error message is saved in the `error` field.
 

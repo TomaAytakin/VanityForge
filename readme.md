@@ -14,7 +14,7 @@ Stop settling for random addresses. Demand a customized identity that commands *
 
 ### December 2025: The Titanium Upgrade
 As of December 2025, VanityForge has deprecated all CPU mining operations. We have upgraded the entire platform to be **100% GPU-Accelerated**.
-- **Unified Speed:** Every user now utilizes our **Enterprise Titanium GPU Cluster** (NVIDIA L4).
+- **Unified Speed:** Every user now utilizes our **Enterprise CPU Worker Cluster** (NVIDIA L4).
 - **One Lane:** No more "Standard" vs "Turbo". Everyone gets Turbo.
 - **Performance:** Speeds have increased from ~5 MH/s (CPU) to **300 MH/s** (GPU).
 
@@ -105,7 +105,7 @@ We utilize a **Hybrid Cloud Architecture** that separates orchestration from com
 *   **Workers (Serverless):** The backend dispatches heavy computational tasks to **Google Cloud Run**, scaling to zero when not in use.
 
 ### Compute Engine
-*   **Titanium GPU Cluster:** Powered by **NVIDIA L4 GPUs** hosted in `us-central1`. These runners execute our custom **CUDA-optimized `solanity-gpu`** kernel, delivering blazing fast speeds (~300 MH/s) for all users.
+*   **CPU Worker Cluster:** Powered by **NVIDIA L4 GPUs** hosted in `us-central1`. These runners execute our custom **CUDA-optimized `solanity-gpu`** kernel, delivering blazing fast speeds (~300 MH/s) for all users.
 *   **Legacy CPU:** Deprecated and removed in v2.0.
 
 ## ✨ Key Features

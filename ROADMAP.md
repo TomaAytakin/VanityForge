@@ -25,7 +25,7 @@ This roadmap tracks the development progress of the VanityForge platform, from t
 ### 🚧 IN PROGRESS / Q1 2026
 
 **Performance & Engine**
-*   **Phase 3: 100% L4 GPU Transition:** [Current/Live] Migrating all workload to the Titanium GPU Cluster.
+*   **Phase 3: 100% L4 GPU Transition:** [Current/Live] Migrating all workload to the CPU Worker Cluster.
 *   **CPU/GPU Hybrid Tiering:** [Completed/Deprecated] Hybrid model replaced by single-lane GPU architecture.
 *   **Public API for Developers:** Creating a standardized API for third-party integrations.
 
