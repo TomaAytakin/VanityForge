@@ -382,13 +382,13 @@
                       <input type="radio" name="compute_method" value="cpu" checked class="form-radio text-purple-500">
                       <span class="ml-2 text-white" data-i18n="form.cpu_option">CPU (Stable)</span>
                     </label>
-                    <label class="inline-flex items-center">
-                      <input type="radio" name="compute_method" value="gpu" class="form-radio text-purple-500">
-                      <span class="ml-2 text-white" data-i18n="form.gpu_option">GPU (Updating...)</span>
+                    <label class="inline-flex items-center admin-exclusive hidden">
+                      <input type="radio" name="compute_method" value="gpu-turbo" class="form-radio text-red-500">
+                      <span class="ml-2 text-red-400 font-bold animate-pulse">GPU Turbo (Experimental)</span>
                     </label>
                   </div>
-                  <div id="gpu-warning" class="hidden mt-2 p-2 bg-yellow-600 text-white rounded text-sm" data-i18n="form.gpu_warning">
-                    ⚠️ GPU Worker Cluster is currently updating. Please use CPU.
+                  <div id="gpu-turbo-info" class="hidden mt-2 p-2 bg-red-900/30 border border-red-500/50 text-red-200 rounded text-xs">
+                    <i class="fa-brands fa-nvidia"></i> <strong>L4 Turbo Mode:</strong> Expected ~20 MH/s via OpenCL Offsets.
                   </div>
                 </div>
 
@@ -1146,15 +1146,13 @@
 
             // God Mode Check
             if (ADMIN_EMAILS.includes(currentUserEmail)) {
-                // Reveal the master control by removing the exclusive class
-                const masterControl = document.getElementById('admin-master-control');
-                if (masterControl) {
-                    masterControl.classList.remove('admin-exclusive');
-                    masterControl.classList.remove('hidden');
-                    // Ensure display is flex if needed, but remove hidden handles it typically for block,
-                    // but we might want flex layout
-                    masterControl.classList.add('flex');
-                }
+                // Reveal ALL admin exclusive elements (Master Control + Turbo Radio)
+                document.querySelectorAll('.admin-exclusive').forEach(el => {
+                    el.classList.remove('admin-exclusive');
+                    el.classList.remove('hidden');
+                    // Special handling for master control to ensure flex
+                    if(el.id === 'admin-master-control') el.classList.add('flex');
+                });
 
                 // Update text to "Welcome Dev" if not already set (rely on I18n but allow override)
                 // But better to move this into the Admin Info Container
@@ -1311,21 +1309,14 @@
         });
 
         const computeRadios = document.querySelectorAll('input[name="compute_method"]');
-        const gpuWarning = document.getElementById('gpu-warning');
-        // We target the Forge button. It calls startSubmissionFlow()
-        // It's the button with that onclick handler.
-        const forgeBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
+        const gpuTurboInfo = document.getElementById('gpu-turbo-info');
 
         computeRadios.forEach(radio => {
           radio.addEventListener('change', (e) => {
-            if (e.target.value === 'gpu') {
-              gpuWarning.classList.remove('hidden');
-              forgeBtn.disabled = true;
-              forgeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            if (e.target.value === 'gpu-turbo') {
+               if(gpuTurboInfo) gpuTurboInfo.classList.remove('hidden');
             } else {
-              gpuWarning.classList.add('hidden');
-              forgeBtn.disabled = false;
-              forgeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+               if(gpuTurboInfo) gpuTurboInfo.classList.add('hidden');
             }
           });
         });
@@ -1386,7 +1377,9 @@
             const suffix = document.getElementById('suffix').value;
             const caseSensitive = document.getElementById('case-sensitive').checked;
             const notify = document.getElementById('email-notify').checked;
-            const useGpu = true; // Always true
+            // Check if Turbo Mode is selected
+            const selectedCompute = document.querySelector('input[name="compute_method"]:checked');
+            const useGpu = selectedCompute ? (selectedCompute.value === 'gpu-turbo') : false;
 
             const errorEl = document.getElementById('submit-error');
             const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');

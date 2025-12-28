@@ -1,14 +1,11 @@
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
-RUN apt-get update && apt-get install -y python3 python3-pip git build-essential
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
+RUN apt-get update && apt-get install -y python3 python3-pip git build-essential ocl-icd-opencl-dev nvidia-opencl-icd
 WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt google-cloud-firestore firebase-admin
 COPY solanity-gpu/ .
 # Compile the GPU miner
 RUN make
-
-# Generate precomputed tables during build
-RUN ./solanity --generate-tables
 
 # Create non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app

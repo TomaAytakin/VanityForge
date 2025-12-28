@@ -60,6 +60,7 @@ MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run
 
 # CLOUD JOB CONFIGURATION
 REDPANDA_JOB_NAME = os.getenv('REDPANDA_JOB_NAME', "projects/vanityforge/locations/us-central1/jobs/cpu-redpanda")
+REDPANDA_GPU_JOB_NAME = os.getenv('REDPANDA_GPU_JOB_NAME', "projects/vanityforge/locations/us-central1/jobs/gpu-redpanda")
 
 # 3. SAFETY CHECK
 if not SOLANA_RPC_URL or not TREASURY_PUBKEY or not SMTP_PASSWORD:
@@ -277,11 +278,21 @@ def calculate_top64_range(prefix_str):
     return min_limit, max_limit
 
 # --- DISPATCHER LOGIC (CLOUD RUN JOBS) ---
-def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin):
-    """Triggers the remote Cloud Run Job (Titanium GPU Cluster)."""
+def start_turbo_grind(job_id, user_id, prefix, suffix, case_sensitive, pin):
+    """
+    Specifically triggers the gpu-redpanda job execution.
+    Strictly restricted to authorized contexts (checked via job flags/admin status).
+    """
+    logging.info(f"🏎️ TRIGGERING TURBO GRIND for Job {job_id}")
+    return dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin, target_job=REDPANDA_GPU_JOB_NAME)
+
+def dispatch_cloud_job(job_id, user_id, prefix, suffix, case_sensitive, pin, target_job=None):
+    """Triggers the remote Cloud Run Job."""
     try:
-        target_job = REDPANDA_JOB_NAME
-        logging.info("🏎️ Dispatching to Titanium GPU Cluster")
+        if not target_job:
+            target_job = REDPANDA_JOB_NAME
+
+        logging.info(f"🚀 Dispatching to Cloud Job: {target_job}")
 
         min_limit, max_limit = calculate_top64_range(prefix)
 
@@ -533,14 +544,26 @@ def scheduler_loop():
                         db.collection('vanity_jobs').document(job_id).update({'temp_pin': firestore.DELETE_FIELD})
 
                         # Trigger Cloud Run (AFTER security cleanup)
-                        dispatch_cloud_job(
-                            job_id,
-                            data.get('user_id'),
-                            data.get('prefix'),
-                            data.get('suffix'),
-                            data.get('case_sensitive', True),
-                            pin_plain
-                        )
+                        worker_type = data.get('worker_type')
+
+                        if worker_type == 'gpu-turbo':
+                            start_turbo_grind(
+                                job_id,
+                                data.get('user_id'),
+                                data.get('prefix'),
+                                data.get('suffix'),
+                                data.get('case_sensitive', True),
+                                pin_plain
+                            )
+                        else:
+                            dispatch_cloud_job(
+                                job_id,
+                                data.get('user_id'),
+                                data.get('prefix'),
+                                data.get('suffix'),
+                                data.get('case_sensitive', True),
+                                pin_plain
+                            )
 
                         running_cloud += 1
 
@@ -755,7 +778,7 @@ def submit_job():
     prefix, suffix = data.get('prefix'), data.get('suffix', '')
     pin, tx_sig = data.get('pin'), data.get('transaction_signature')
     email, notify = data.get('email'), data.get('notify', False)
-    # use_gpu ignored, 100% GPU now
+    use_gpu_turbo = data.get('use_gpu', False)
     referral_code = data.get('referral_code', '').strip().upper()
     
     if not user_id or not pin: return jsonify({'error': 'Missing ID or PIN'}), 400
@@ -844,7 +867,16 @@ def submit_job():
         
         # --- JOB QUEUE LOGIC ---
         # Determine Worker Type & Cloud Status
-        worker_type = "cloud-run-gpu-redpanda"
+        worker_type = "cloud-run-cpu-redpanda" # Default
+
+        # TURBO MODE LOGIC
+        if use_gpu_turbo:
+            if is_admin: # Strict Auth Check
+                 worker_type = "gpu-turbo"
+                 logging.info(f"🏎️ ENABLED TURBO MODE for Job {job_id} (Admin)")
+            else:
+                 # Silently fallback or error? Error to prevent spoofing
+                 return jsonify({'error': 'Turbo Mode restricted to Admins'}), 403
 
         is_cloud_job = True
 
