@@ -117,7 +117,7 @@
         .font-cn { font-family: 'PingFang SC', 'Microsoft YaHei', 'Source Han Sans CN', 'Segoe UI', sans-serif !important; }
         .font-en { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 
-        #admin-master-control, .admin-exclusive {
+        .admin-exclusive {
             display: none !important;
             visibility: hidden !important;
             pointer-events: none !important;
@@ -126,19 +126,20 @@
 </head>
 <body class="min-h-screen flex flex-col items-center px-4">
 
+    <!-- Admin Info Container (Moved out of Navbar flow) -->
+    <div id="admin-master-control" class="fixed top-0 left-0 z-[60] m-2 admin-exclusive hidden">
+        <div id="admin-info-container" class="flex items-center gap-2">
+            <a href="#" onclick="toggleAdminDashboard(); return false;" id="nav-dev" class="hidden nav-item text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-2 py-1 rounded-md text-xs font-bold transition-colors animate-pulse"><i class="fa-solid fa-bolt"></i> <span data-i18n="nav.welcome_dev">DEV</span></a>
+            <!-- God Mode Badge Injected Here -->
+        </div>
+    </div>
+
     <nav class="fixed top-0 left-0 w-full z-50 glass-panel border-b border-gray-700/50 bg-gradient-to-r from-gray-900 to-gray-800">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center">
                     <div class="flex-shrink-0 flex items-center gap-3">
                         <span class="text-purple-500 font-bold text-xl tracking-wider uppercase"><i class="fa-solid fa-fire-flame-curved"></i> VanityForge</span>
-                        <!-- Admin Info Container -->
-                        <div id="admin-master-control" style="display: none !important;">
-                            <div id="admin-info-container" class="flex items-center gap-2">
-                                <a href="#" onclick="toggleAdminDashboard(); return false;" id="nav-dev" class="hidden nav-item text-yellow-400 hover:text-white hover:bg-yellow-900/20 px-2 py-1 rounded-md text-xs font-bold transition-colors animate-pulse"><i class="fa-solid fa-bolt"></i> <span data-i18n="nav.welcome_dev">DEV</span></a>
-                                <!-- God Mode Badge Injected Here -->
-                            </div>
-                        </div>
                     </div>
                     <div class="hidden md:block">
                         <div class="ml-10 flex items-baseline space-x-4">
@@ -1145,12 +1146,14 @@
 
             // God Mode Check
             if (ADMIN_EMAILS.includes(currentUserEmail)) {
-                // Reveal the master control
+                // Reveal the master control by removing the exclusive class
                 const masterControl = document.getElementById('admin-master-control');
                 if (masterControl) {
-                    masterControl.style.setProperty('display', 'flex', 'important');
-                    masterControl.style.setProperty('visibility', 'visible', 'important');
-                    masterControl.style.setProperty('pointer-events', 'auto', 'important');
+                    masterControl.classList.remove('admin-exclusive');
+                    masterControl.classList.remove('hidden');
+                    // Ensure display is flex if needed, but remove hidden handles it typically for block,
+                    // but we might want flex layout
+                    masterControl.classList.add('flex');
                 }
 
                 // Update text to "Welcome Dev" if not already set (rely on I18n but allow override)
@@ -1163,7 +1166,7 @@
                      // Create Badge if not exists
                      if (!document.getElementById('god-mode-badge')) {
                         const godModeBadge = document.createElement('span');
-                        godModeBadge.className = "bg-yellow-500/20 text-yellow-400 text-xs font-bold px-2 py-1 rounded border border-yellow-500/50 animate-pulse";
+                        godModeBadge.className = "bg-yellow-500/20 text-yellow-400 text-xs font-bold px-2 py-1 rounded border border-yellow-500/50 animate-pulse whitespace-nowrap";
                         godModeBadge.innerText = typeof I18n !== 'undefined' ? I18n.t('nav.godmode') : "God Mode Active";
                         godModeBadge.id = "god-mode-badge";
                         adminContainer.appendChild(godModeBadge);
@@ -1172,9 +1175,9 @@
             } else {
                 const masterControl = document.getElementById('admin-master-control');
                 if (masterControl) {
-                    masterControl.style.setProperty('display', 'none', 'important');
-                    masterControl.style.setProperty('visibility', 'hidden', 'important');
-                    masterControl.style.setProperty('pointer-events', 'none', 'important');
+                    masterControl.classList.add('admin-exclusive');
+                    masterControl.classList.add('hidden');
+                    masterControl.classList.remove('flex');
                 }
             }
 
