@@ -125,31 +125,62 @@ def main():
     if case_sensitive == 'false':
         grind_args.append("--ignore-case")
 
-    # Use solana-keygen from /usr/local/bin/ (installed in Dockerfile)
-    solana_keygen_cmd = "/usr/local/bin/solana-keygen"
+    # Check for Turbo Binary
+    gpu_binary = "./gpu_grinder"
+    use_turbo = os.path.exists(gpu_binary)
 
-    command = [solana_keygen_cmd, "grind"] + grind_args
+    if use_turbo:
+        logging.info("🚀 Starting L4 Turbo Grinder...")
+        # Reconstruct args for C++ binary
+        command = [gpu_binary]
+        if prefix: command.extend(["--prefix", prefix])
+        if suffix: command.extend(["--suffix", suffix])
+        if case_sensitive == 'true': command.extend(["--case-sensitive", "true"])
 
-    logging.info(f"Running command: {command}")
+        logging.info(f"Running Turbo command: {command}")
 
-    try:
+        start_time = time.time()
+
+        # Live Streaming Logic
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+
+        # Read stdout line by line
+        for line in iter(process.stdout.readline, ''):
+            line = line.strip()
+            if not line: continue
+
+            # Passthrough standardized tags
+            if line.startswith("[STATS]") or line.startswith("[STATUS]") or line.startswith("[ERROR]") or line.startswith("[SUCCESS]"):
+                print(line, flush=True) # Direct to Cloud Run logs
+                logging.info(line)
+            else:
+                logging.debug(f"Worker output: {line}")
+
+        process.wait()
+
+        if process.returncode != 0:
+            logging.error(f"Turbo Grinder failed with code {process.returncode}")
+            # Fallback or exit?
+            sys.exit(process.returncode)
+
+    else:
+        # Fallback to Legacy Rust Grinder
+        solana_keygen_cmd = "/usr/local/bin/solana-keygen"
+        command = [solana_keygen_cmd, "grind"] + grind_args
+
+        logging.info(f"Running command: {command}")
+
         start_time = time.time()
         # Run the grind
         process = subprocess.run(command, capture_output=True, text=True, check=True)
+
+        # Legacy Hashrate Calc (Post-Run)
         end_time = time.time()
-
         elapsed = end_time - start_time
-        if elapsed <= 0: elapsed = 0.001 # Prevent division by zero
-
-        # Calculate Hashrate
-        # Length used is the length of the pattern (prefix or suffix)
+        if elapsed <= 0: elapsed = 0.001
         length = len(prefix) if prefix else len(suffix)
         hashrate_mhs = (58**length) / elapsed / 1_000_000
         logging.info(f"Hashrate: {hashrate_mhs:.1f} MH/s")
-        sys.stderr.write(f"Hashrate: {hashrate_mhs:.1f} MH/s\n")
-
-        # Log stdout/stderr for debugging
-        logging.info(f"Command stdout: {process.stdout}")
 
         # Find the .json file solana-keygen just made
         json_files = glob.glob("*.json")
