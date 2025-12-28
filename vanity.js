@@ -139,9 +139,9 @@ async function checkAdmin() {
             // Reveal the master control
             const masterControl = document.getElementById('admin-master-control');
             if (masterControl) {
-                masterControl.style.setProperty('display', 'flex', 'important');
-                masterControl.style.setProperty('visibility', 'visible', 'important');
-                masterControl.style.setProperty('pointer-events', 'auto', 'important');
+                masterControl.classList.remove('admin-exclusive');
+                masterControl.classList.remove('hidden');
+                masterControl.classList.add('flex');
             }
 
             // 2. Show Navbar Item
@@ -163,9 +163,9 @@ async function checkAdmin() {
         } else {
             const masterControl = document.getElementById('admin-master-control');
             if (masterControl) {
-                masterControl.style.setProperty('display', 'none', 'important');
-                masterControl.style.setProperty('visibility', 'hidden', 'important');
-                masterControl.style.setProperty('pointer-events', 'none', 'important');
+                masterControl.classList.add('admin-exclusive');
+                masterControl.classList.add('hidden');
+                masterControl.classList.remove('flex');
             }
         }
     } catch (e) {
