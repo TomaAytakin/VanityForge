@@ -1,11 +1,38 @@
-FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
-RUN apt-get update && apt-get install -y python3 python3-pip git build-essential ocl-icd-opencl-dev nvidia-opencl-icd
-WORKDIR /app
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt google-cloud-firestore firebase-admin
+# Multi-stage build for GPU Worker
+# Stage 1: Build the C++ GPU miner using CUDA image
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 as builder
+WORKDIR /build
 COPY solanity-gpu/ .
-# Compile the GPU miner
+# Compile the GPU miner (result is 'gpu_grinder')
 RUN make
+
+# Stage 2: Runtime image using Python 3.11 Slim
+FROM python:3.11-slim
+WORKDIR /app
+
+# Install system dependencies required for Python packages and runtime
+# git and build-essential might be needed for pip installs if wheels are missing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+COPY solanity-gpu/requirements.txt ./solanity-gpu-requirements.txt
+
+# Install Python dependencies
+# Note: google-cloud-firestore and firebase-admin are from root requirements in original,
+# solanity-gpu/requirements.txt has specific ones. We merge them essentially.
+RUN pip3 install --no-cache-dir google-cloud-firestore firebase-admin \
+    && pip3 install --no-cache-dir -r solanity-gpu-requirements.txt
+
+# Copy the built binary from builder stage
+COPY --from=builder /build/gpu_grinder .
+
+# Copy the worker script and other necessary files
+COPY solanity-gpu/worker.py .
 
 # Create non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app

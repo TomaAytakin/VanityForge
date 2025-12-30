@@ -111,7 +111,7 @@ int main(int argc, char* argv[]) {
             // Let's throttle or adjust.
 
             // For the sake of the requirement "Print the [STATS] log only once every 30 seconds", we do this:
-            std::cout << "[STATS] Hashrate: " << std::fixed << std::setprecision(2) << mhs << " MH/s | Total: " << total_hashes << std::endl;
+            std::cout << "[STATS] " << std::fixed << std::setprecision(2) << mhs << " MH/s" << std::endl;
             last_log_time = now;
         }
 

@@ -1,5 +1,5 @@
 CC=nvcc
-CFLAGS=-arch=sm_89 -O3
+CFLAGS=-arch=sm_89 -O3 --cudart static
 TARGET=gpu_grinder
 
 all: $(TARGET)
