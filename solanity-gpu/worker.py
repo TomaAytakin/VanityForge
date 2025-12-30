@@ -14,6 +14,7 @@ import base64
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import multiprocessing
 
 def setup_logging():
     """Sets up Google Cloud Logging if available, otherwise falls back to standard logging."""
@@ -108,6 +109,11 @@ def main():
     job_id = os.environ.get('TASK_JOB_ID')
     server_url = os.environ.get('SERVER_URL')
 
+    # Force multi-core usage for CPU tasks (legacy/Rust path)
+    cpu_count = multiprocessing.cpu_count()
+    os.environ["RAYON_NUM_THREADS"] = str(cpu_count)
+    logging.info(f"Setting RAYON_NUM_THREADS to {cpu_count}")
+
     if not job_id:
         logging.warning("TASK_JOB_ID not set. Proceeding but callback might fail.")
 
@@ -125,111 +131,114 @@ def main():
     if case_sensitive == 'false':
         grind_args.append("--ignore-case")
 
-    # Check for Turbo Binary
-    gpu_binary = "./gpu_grinder"
-    use_turbo = os.path.exists(gpu_binary)
+    try:
+        # Check for Turbo Binary
+        gpu_binary = "./gpu_grinder"
+        use_turbo = os.path.exists(gpu_binary)
 
-    if use_turbo:
-        logging.info("🚀 Starting L4 Turbo Grinder...")
-        # Reconstruct args for C++ binary
-        command = [gpu_binary]
-        if prefix: command.extend(["--prefix", prefix])
-        if suffix: command.extend(["--suffix", suffix])
-        if case_sensitive == 'true': command.extend(["--case-sensitive", "true"])
+        if use_turbo:
+            logging.info("🚀 Starting L4 Turbo Grinder...")
+            # Reconstruct args for C++ binary
+            command = [gpu_binary]
+            if prefix: command.extend(["--prefix", prefix])
+            if suffix: command.extend(["--suffix", suffix])
+            if case_sensitive == 'true': command.extend(["--case-sensitive", "true"])
 
-        logging.info(f"Running Turbo command: {command}")
+            logging.info(f"Running Turbo command: {command}")
 
-        start_time = time.time()
+            # Live Streaming Logic - merge stderr to stdout
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 
-        # Live Streaming Logic
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+            # Read stdout line by line
+            for line in iter(process.stdout.readline, ''):
+                line = line.strip()
+                if not line: continue
 
-        # Read stdout line by line
-        for line in iter(process.stdout.readline, ''):
-            line = line.strip()
-            if not line: continue
+                # Passthrough standardized tags
+                if line.startswith("[STATS]"):
+                    print(line, flush=True) # Direct to Cloud Run logs
+                    # Log suppression: Do NOT duplicate [STATS] to Cloud Logging API
+                elif line.startswith("[STATUS]") or line.startswith("[ERROR]") or line.startswith("[SUCCESS]"):
+                    print(line, flush=True)
+                    logging.info(line)
+                else:
+                    # Log suppression: Prevent "Progress" messages or large blobs from hitting Cloud Logging
+                    pass
 
-            # Passthrough standardized tags
-            if line.startswith("[STATS]") or line.startswith("[STATUS]") or line.startswith("[ERROR]") or line.startswith("[SUCCESS]"):
-                print(line, flush=True) # Direct to Cloud Run logs
-                logging.info(line)
-            else:
-                logging.debug(f"Worker output: {line}")
+            process.wait()
 
-        process.wait()
+            if process.returncode != 0:
+                logging.error(f"Turbo Grinder failed with code {process.returncode}")
+                # Fallback or exit?
+                sys.exit(process.returncode)
 
-        if process.returncode != 0:
-            logging.error(f"Turbo Grinder failed with code {process.returncode}")
-            # Fallback or exit?
-            sys.exit(process.returncode)
+        else:
+            # Fallback to Legacy Rust Grinder
+            solana_keygen_cmd = "/usr/local/bin/solana-keygen"
+            command = [solana_keygen_cmd, "grind"] + grind_args
 
-    else:
-        # Fallback to Legacy Rust Grinder
-        solana_keygen_cmd = "/usr/local/bin/solana-keygen"
-        command = [solana_keygen_cmd, "grind"] + grind_args
+            logging.info(f"Running command: {command}")
 
-        logging.info(f"Running command: {command}")
+            start_time = time.time()
+            # Run the grind
+            process = subprocess.run(command, capture_output=True, text=True, check=True)
 
-        start_time = time.time()
-        # Run the grind
-        process = subprocess.run(command, capture_output=True, text=True, check=True)
+            # Legacy Hashrate Calc (Post-Run)
+            end_time = time.time()
+            elapsed = end_time - start_time
+            if elapsed <= 0: elapsed = 0.001
+            length = len(prefix) if prefix else len(suffix)
+            hashrate_mhs = (58**length) / elapsed / 1_000_000
+            logging.info(f"Hashrate: {hashrate_mhs:.1f} MH/s")
 
-        # Legacy Hashrate Calc (Post-Run)
-        end_time = time.time()
-        elapsed = end_time - start_time
-        if elapsed <= 0: elapsed = 0.001
-        length = len(prefix) if prefix else len(suffix)
-        hashrate_mhs = (58**length) / elapsed / 1_000_000
-        logging.info(f"Hashrate: {hashrate_mhs:.1f} MH/s")
+            # Find the .json file solana-keygen just made
+            json_files = glob.glob("*.json")
+            if not json_files:
+                error_msg = "Keypair file not generated"
+                logging.error(error_msg)
+                report_status(server_url, {"job_id": job_id, "error": error_msg})
+                sys.exit(1)
 
-        # Find the .json file solana-keygen just made
-        json_files = glob.glob("*.json")
-        if not json_files:
-            error_msg = "Keypair file not generated"
-            logging.error(error_msg)
-            report_status(server_url, {"job_id": job_id, "error": error_msg})
-            sys.exit(1)
+            found_file = json_files[0]
+            logging.info(f"Found keypair file: {found_file}")
 
-        found_file = json_files[0]
-        logging.info(f"Found keypair file: {found_file}")
+            with open(found_file, "r") as f:
+                keypair_data = json.load(f)
 
-        with open(found_file, "r") as f:
-            keypair_data = json.load(f)
+            private_key_bytes = bytes(keypair_data)
+            private_key_b58 = base58.b58encode(private_key_bytes).decode('utf-8')
 
-        private_key_bytes = bytes(keypair_data)
-        private_key_b58 = base58.b58encode(private_key_bytes).decode('utf-8')
-        
-        # Last 32 bytes are always the public key in a 64-byte Solana keypair
-        public_key_bytes = private_key_bytes[32:]
-        public_key_b58 = base58.b58encode(public_key_bytes).decode('utf-8')
+            # Last 32 bytes are always the public key in a 64-byte Solana keypair
+            public_key_bytes = private_key_bytes[32:]
+            public_key_b58 = base58.b58encode(public_key_bytes).decode('utf-8')
 
-        # V19 Security Update: Internal Encryption
-        # Sync with Environment
-        task_pin = os.environ.get('TASK_PIN')
-        task_user_id = os.environ.get('TASK_USER_ID')
+            # V19 Security Update: Internal Encryption
+            # Sync with Environment
+            task_pin = os.environ.get('TASK_PIN')
+            task_user_id = os.environ.get('TASK_USER_ID')
 
-        if not task_pin or not task_user_id:
-            error_msg = "V19 Security Error: Missing TASK_PIN or TASK_USER_ID env vars"
-            logging.error(error_msg)
-            report_status(server_url, {"job_id": job_id, "error": error_msg})
-            sys.exit(1)
+            if not task_pin or not task_user_id:
+                error_msg = "V19 Security Error: Missing TASK_PIN or TASK_USER_ID env vars"
+                logging.error(error_msg)
+                report_status(server_url, {"job_id": job_id, "error": error_msg})
+                sys.exit(1)
 
-        # Encrypt
-        key = generate_key_from_pin(task_pin, task_user_id)
-        encrypted_secret_key = Fernet(key).encrypt(private_key_b58.encode()).decode()
+            # Encrypt
+            key = generate_key_from_pin(task_pin, task_user_id)
+            encrypted_secret_key = Fernet(key).encrypt(private_key_b58.encode()).decode()
 
-        result = {
-            "job_id": job_id,
-            "public_key": public_key_b58,
-            "secret_key": encrypted_secret_key
-        }
+            result = {
+                "job_id": job_id,
+                "public_key": public_key_b58,
+                "secret_key": encrypted_secret_key
+            }
 
-        # Send Callback
-        report_status(server_url, result)
+            # Send Callback
+            report_status(server_url, result)
 
-        # Clean up
-        os.remove(found_file)
-        logging.info("Job completed successfully")
+            # Clean up
+            os.remove(found_file)
+            logging.info("Job completed successfully")
 
     except subprocess.CalledProcessError as e:
         logging.error(f"Subprocess error: {e.stderr}")
