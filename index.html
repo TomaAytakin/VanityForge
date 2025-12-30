@@ -437,11 +437,11 @@
                         </tr>
                         <tr>
                             <td>5 Chars</td>
-                            <td class="text-right text-green-400">~1 Sec</td>
+                            <td class="text-right text-green-400">~1 Min</td>
                         </tr>
                         <tr>
                             <td>6 Chars</td>
-                            <td class="text-right text-yellow-400">~1 Min</td>
+                            <td class="text-right text-yellow-400">~1 Hour</td>
                         </tr>
                     </tbody>
                 </table>
@@ -648,6 +648,7 @@
 
     <script>
         // CONFIGURATION (HARDCODED)
+        const BASE_HASHRATE = 10000000;
         const TREASURY_WALLET_ADDRESS = "CUfjsGUee8u83dfFxHt1jXJUCRLiF1KoWVYcKyVforGe";
         const API_URL = "/submit-job"; // Relative path
         const FIREBASE_CONFIG = {
@@ -1210,6 +1211,20 @@
             return text.replace(/[&<>"']/g, function(m) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[m]; });
         }
 
+        function calculateForgeTime(totalLen) {
+            if (totalLen === 0) return 0;
+            // Formula: (58^TotalLength) / BASE_HASHRATE
+            // No provisioning buffer added to raw calculation to match pricing table 10 MH/s math
+            return (Math.pow(58, totalLen)) / BASE_HASHRATE;
+        }
+
+        function formatTime(seconds) {
+            if (seconds < 60) return "Instant"; // < 1 min
+            if (seconds < 3600) return Math.ceil(seconds/60) + "m";
+            if (seconds < 86400) return (seconds/3600).toFixed(1) + "h";
+            return (seconds/86400).toFixed(1) + "d";
+        }
+
         function updateEstimates() {
             const p = document.getElementById('prefix').value || "";
             const s = document.getElementById('suffix').value || "";
@@ -1258,22 +1273,8 @@
             }
 
             // Time Estimate Logic
-            // New Formula: (Difficulty / 300,000,000) + 600
-            // Difficulty = 0.5 * 58^TotalLength
-            // 600s buffer for cloud provisioning
-
-            let difficulty = 0.5 * Math.pow(58, totalLen);
-            let speed = 300000000; // 300 MH/s
-            let buffer = 600; // 10 minutes
-
-            let seconds = (difficulty / speed) + buffer;
-
-            let timeStr;
-            // Always show minutes if < hour, else hours/days
-            // Since min is 600s (10m), we start at 10m
-            if (seconds < 3600) timeStr = Math.ceil(seconds/60) + "m";
-            else if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + "h";
-            else timeStr = (seconds/86400).toFixed(1) + "d";
+            let seconds = calculateForgeTime(totalLen);
+            let timeStr = formatTime(seconds);
 
             document.getElementById('calc-difficulty').innerText = totalLen + " chars";
             document.getElementById('calc-time').innerText = "~" + timeStr;
@@ -1287,16 +1288,20 @@
                  costEl.innerHTML = `<span style="text-decoration:line-through;" class="text-gray-500 mr-2">${basePrice.toFixed(2)} SOL</span> <span class="text-purple-400">${finalPrice.toFixed(2)} SOL</span>`;
             }
 
-            // Hard Limit Warning - REMOVED for >5 because we now support it via GPU
-            /*
-            if (totalLen > 5 && !ADMIN_EMAILS.includes(currentUserEmail)) {
-                // ...
+            // Hard Limit Warning - Max 6 Chars
+            const submitBtn = document.querySelector('button[onclick="startSubmissionFlow()"]');
+            const submitError = document.getElementById('submit-error');
+
+            if (totalLen > 6) {
+                document.getElementById('calc-difficulty').innerHTML = `<span class="text-red-400">Max 6 characters allowed for Beta</span>`;
+                submitBtn.disabled = true;
+                submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                // Clear errors
+                submitError.classList.add('hidden');
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             }
-            */
-           // Clear errors
-           document.getElementById('submit-error').classList.add('hidden');
-           document.querySelector('button[onclick="startSubmissionFlow()"]').disabled = false;
-           document.querySelector('button[onclick="startSubmissionFlow()"]').classList.remove('opacity-50', 'cursor-not-allowed');
         }
 
         ['prefix', 'suffix'].forEach(id => {
@@ -1357,14 +1362,14 @@
                 return;
              }
              document.getElementById('submit-error').classList.add('hidden');
-             // Check estimated time
-             // Time (seconds) = (0.5 * 58^TotalLength) / 5,000,000
-             let seconds = (0.5 * Math.pow(58, totalLen)) / 5000000;
+
+             // Check estimated time using shared logic
+             let seconds = calculateForgeTime(totalLen);
              if (seconds > 3600) {
-                 let timeStr;
-                 if (seconds < 86400) timeStr = (seconds/3600).toFixed(1) + " hours";
-                 else timeStr = (seconds/86400).toFixed(1) + " days";
-                 if (!confirm(`This job may take ${timeStr}. Do you accept the wait and proceed?`)) {
+                 let timeStr = formatTime(seconds);
+                 // FormatTime returns "1.0h" or "1.0d", maybe we want full words for alert?
+                 // Keeping formatTime is consistent with header.
+                 if (!confirm(`This job may take ~${timeStr}. Do you accept the wait and proceed?`)) {
                      return;
                  }
              }

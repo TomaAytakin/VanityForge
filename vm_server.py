@@ -55,6 +55,8 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 # --- ADMIN LIST (GOD MODE) ---
 ADMIN_EMAILS = set(os.getenv('ADMIN_EMAILS', "tomaaytakin@gmail.com,admin@vanityforge.org,Jonny95hidalgo@gmail.com").split(','))
 
+BASE_HASHRATE = 10_000_000
+
 # --- QUEUE LIMITS (TRAFFIC CONTROL) ---
 MAX_CLOUD_JOBS = 100  # Max concurrent jobs on Cloud Run
 
@@ -854,7 +856,7 @@ def submit_job():
                 price = price * 0.90
         
         # Hard Limit
-        if total_len > 8: return jsonify({'error': 'Max 8 chars allowed in Beta'}), 403
+        if total_len > 6: return jsonify({'error': 'Max 6 characters allowed in Beta'}), 403
 
         # Payment Check
         if price > 0:
