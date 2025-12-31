@@ -1,5 +1,5 @@
 # 1. Builder: Use Bookworm (Debian 12) to match Runner
-FROM rust:1.75-bookworm as builder
+FROM rust:bookworm as builder
 WORKDIR /app
 COPY cpu-grinder/ .
 RUN cargo build --release
