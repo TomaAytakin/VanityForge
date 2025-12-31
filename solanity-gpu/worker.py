@@ -48,7 +48,7 @@ def report_status(server_url, payload):
         logging.error(f"Failed to report status: {e}")
 
 def main():
-    print("BOOT OK", flush=True)
+    print("JOB BOOT OK", flush=True)
     setup_logging()
     # 1. Parse Args manually (Cloud Run pass-through)
     args = sys.argv[1:]

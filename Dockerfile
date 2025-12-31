@@ -33,4 +33,4 @@ USER appuser
 ENV WORKER_TYPE=CPU
 ENV BINARY_PATH=/app/cpu-grinder-bin
 
-CMD ["python3", "-u", "/app/worker.py"]
+ENTRYPOINT ["/usr/local/bin/python3", "-u", "/app/worker.py"]
