@@ -5,8 +5,6 @@ import sys
 import base58
 import logging
 import requests
-import google.cloud.logging
-from google.cloud.logging.handlers import CloudLoggingHandler
 import time
 import hashlib
 import base64
@@ -14,14 +12,16 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-# Configure Logging
-try:
-    client = google.cloud.logging.Client()
-    handler = CloudLoggingHandler(client)
-    google.cloud.logging.handlers.setup_logging(handler)
-    logging.getLogger().setLevel(logging.INFO)
-except:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def setup_logging():
+    try:
+        import google.cloud.logging
+        from google.cloud.logging.handlers import CloudLoggingHandler
+        client = google.cloud.logging.Client()
+        handler = CloudLoggingHandler(client)
+        google.cloud.logging.handlers.setup_logging(handler)
+        logging.getLogger().setLevel(logging.INFO)
+    except:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_deterministic_salt(user_id):
     return hashlib.sha256(user_id.encode()).digest()
@@ -48,6 +48,8 @@ def report_status(server_url, payload):
         logging.error(f"Failed to report status: {e}")
 
 def main():
+    print("BOOT OK", flush=True)
+    setup_logging()
     # 1. Parse Args manually (Cloud Run pass-through)
     args = sys.argv[1:]
     prefix, suffix, case_sensitive = None, None, 'true'
