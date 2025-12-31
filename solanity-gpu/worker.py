@@ -1,7 +1,6 @@
 import subprocess
 import json
 import os
-import glob
 import sys
 import base58
 import logging
@@ -16,18 +15,14 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import multiprocessing
 
-def setup_logging():
-    """Sets up Google Cloud Logging if available, otherwise falls back to standard logging."""
-    try:
-        # Instantiates a client
-        client = google.cloud.logging.Client()
-        handler = CloudLoggingHandler(client)
-        google.cloud.logging.handlers.setup_logging(handler)
-        logging.getLogger().setLevel(logging.INFO)
-    except Exception as e:
-        # Fallback to standard logging if credentials fail (e.g. local test)
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-        logging.warning(f"Failed to setup Cloud Logging: {e}. using basic logging.")
+# Configure Logging
+try:
+    client = google.cloud.logging.Client()
+    handler = CloudLoggingHandler(client)
+    google.cloud.logging.handlers.setup_logging(handler)
+    logging.getLogger().setLevel(logging.INFO)
+except:
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_deterministic_salt(user_id):
     return hashlib.sha256(user_id.encode()).digest()
@@ -38,218 +33,95 @@ def generate_key_from_pin(pin, user_id):
     return base64.urlsafe_b64encode(kdf.derive(pin.encode()))
 
 def report_status(server_url, payload):
-    """Sends the result or error back to the server."""
     if not server_url:
-        logging.error("SERVER_URL not set, cannot report status.")
+        logging.error("SERVER_URL not set")
         return
-
     try:
-        # Ensure url ends with /api/worker/complete or append it if it's just base url
-        # The env var is likely just the base url "https://vanityforge.org"
-        if not server_url.endswith('/api/worker/complete'):
-            endpoint = f"{server_url.rstrip('/')}/api/worker/complete"
-        else:
-            endpoint = server_url
-
-        logging.info(f"Reporting status to {endpoint}")
-        response = requests.post(endpoint, json=payload, timeout=10)
-        response.raise_for_status()
-        logging.info("Successfully reported status to server.")
+        endpoint = f"{server_url.rstrip('/')}/api/worker/complete" if not server_url.endswith('/api/worker/complete') else server_url
+        requests.post(endpoint, json=payload, timeout=10).raise_for_status()
+        logging.info("Status reported successfully.")
     except Exception as e:
-        logging.error(f"Failed to report status to server: {e}")
+        logging.error(f"Failed to report status: {e}")
 
 def main():
-    setup_logging()
-    
-    # Manual argument parsing to be more robust on Cloud Run
-    prefix = None
-    suffix = None
-    case_sensitive = 'true'
-
+    # Parse Args manually (Cloud Run pass-through)
     args = sys.argv[1:]
-    logging.info(f"Raw arguments: {args}")
+    prefix, suffix, case_sensitive = None, None, 'true'
 
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg == '--prefix':
-            if i + 1 < len(args):
-                prefix = args[i+1]
-                i += 2
-            else:
-                logging.error("--prefix requires an argument")
-                sys.exit(1)
-        elif arg.startswith('--prefix='):
-            prefix = arg.split('=', 1)[1]
-            i += 1
-        elif arg == '--suffix':
-            if i + 1 < len(args):
-                suffix = args[i+1]
-                i += 2
-            else:
-                logging.error("--suffix requires an argument")
-                sys.exit(1)
-        elif arg.startswith('--suffix='):
-            suffix = arg.split('=', 1)[1]
-            i += 1
-        elif arg == '--case-sensitive':
-            if i + 1 < len(args):
-                case_sensitive = args[i+1]
-                i += 2
-            else:
-                logging.error("--case-sensitive requires an argument")
-                sys.exit(1)
-        elif arg.startswith('--case-sensitive='):
-            case_sensitive = arg.split('=', 1)[1]
-            i += 1
+    idx = 0
+    while idx < len(args):
+        if args[idx] == '--prefix' and idx+1 < len(args):
+            prefix = args[idx+1]; idx+=2
+        elif args[idx] == '--suffix' and idx+1 < len(args):
+            suffix = args[idx+1]; idx+=2
+        elif args[idx] == '--case-sensitive' and idx+1 < len(args):
+            case_sensitive = args[idx+1]; idx+=2
         else:
-            # Ignore unknown args or handle as needed
-            i += 1
+            idx+=1
 
+    # Env Vars
     job_id = os.environ.get('TASK_JOB_ID')
     server_url = os.environ.get('SERVER_URL')
+    task_pin = os.environ.get('TASK_PIN')
+    task_user_id = os.environ.get('TASK_USER_ID')
 
-    # Force multi-core usage for CPU tasks (legacy/Rust path)
-    cpu_count = multiprocessing.cpu_count()
-    os.environ["RAYON_NUM_THREADS"] = str(cpu_count)
-    logging.info(f"Setting RAYON_NUM_THREADS to {cpu_count}")
-
-    if not job_id:
-        logging.warning("TASK_JOB_ID not set. Proceeding but callback might fail.")
-
-    grind_args = []
-    if prefix:
-        grind_args.extend(["--starts-with", f"{prefix}:1"])
-    elif suffix:
-        grind_args.extend(["--ends-with", f"{suffix}:1"])
-    else:
-        error_msg = "No pattern provided (prefix or suffix required)"
-        logging.error(error_msg)
-        report_status(server_url, {"job_id": job_id, "error": error_msg})
+    if not all([job_id, task_pin, task_user_id]):
+        logging.error("Missing required env vars: TASK_JOB_ID, TASK_PIN, TASK_USER_ID")
         sys.exit(1)
 
-    if case_sensitive == 'false':
-        grind_args.append("--ignore-case")
+    # Build Command
+    cmd = ["./gpu_grinder"]
+    if prefix: cmd.extend(["--prefix", prefix])
+    if suffix: cmd.extend(["--suffix", suffix])
+    cmd.extend(["--case-sensitive", case_sensitive])
+
+    logging.info(f"Starting GPU Grinder: {cmd}")
 
     try:
-        # Check for Turbo Binary
-        gpu_binary = "./gpu_grinder"
-        use_turbo = os.path.exists(gpu_binary)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 
-        if use_turbo:
-            logging.info("🚀 Starting L4 Turbo Grinder...")
-            # Reconstruct args for C++ binary
-            command = [gpu_binary]
-            if prefix: command.extend(["--prefix", prefix])
-            if suffix: command.extend(["--suffix", suffix])
-            if case_sensitive == 'true': command.extend(["--case-sensitive", "true"])
+        found_pubkey = None
+        found_privkey = None
 
-            logging.info(f"Running Turbo command: {command}")
+        for line in iter(process.stdout.readline, ''):
+            line = line.strip()
+            if not line: continue
 
-            # Live Streaming Logic - merge stderr to stdout
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            # Log stats to Cloud Logging (filtered)
+            if line.startswith("[STATS]"):
+                print(line) # Stdout for local view
+            elif line.startswith("MATCH:"):
+                # Protocol: MATCH:<PUBKEY>:<PRIVKEY>
+                parts = line.split(':')
+                if len(parts) >= 3:
+                    found_pubkey = parts[1]
+                    found_privkey = parts[2]
+                    logging.info("Match found by GPU process!")
+                    process.terminate()
+                    break
+            else:
+                logging.info(f"GPU: {line}")
 
-            # Read stdout line by line
-            for line in iter(process.stdout.readline, ''):
-                line = line.strip()
-                if not line: continue
+        process.wait()
 
-                # Passthrough standardized tags
-                if line.startswith("[STATS]"):
-                    print(line, flush=True) # Direct to Cloud Run logs
-                    # Log suppression: Do NOT duplicate [STATS] to Cloud Logging API
-                elif line.startswith("[STATUS]") or line.startswith("[ERROR]") or line.startswith("[SUCCESS]"):
-                    print(line, flush=True)
-                    logging.info(line)
-                else:
-                    # Log suppression: Prevent "Progress" messages or large blobs from hitting Cloud Logging
-                    pass
-
-            process.wait()
-
-            if process.returncode != 0:
-                logging.error(f"Turbo Grinder failed with code {process.returncode}")
-                # Fallback or exit?
-                sys.exit(process.returncode)
-
-        else:
-            # Fallback to Legacy Rust Grinder
-            solana_keygen_cmd = "/usr/local/bin/solana-keygen"
-            command = [solana_keygen_cmd, "grind"] + grind_args
-
-            logging.info(f"Running command: {command}")
-
-            start_time = time.time()
-            # Run the grind
-            process = subprocess.run(command, capture_output=True, text=True, check=True)
-
-            # Legacy Hashrate Calc (Post-Run)
-            end_time = time.time()
-            elapsed = end_time - start_time
-            if elapsed <= 0: elapsed = 0.001
-            length = len(prefix) if prefix else len(suffix)
-            hashrate_mhs = (58**length) / elapsed / 1_000_000
-            logging.info(f"Hashrate: {hashrate_mhs:.1f} MH/s")
-
-            # Find the .json file solana-keygen just made
-            json_files = glob.glob("*.json")
-            if not json_files:
-                error_msg = "Keypair file not generated"
-                logging.error(error_msg)
-                report_status(server_url, {"job_id": job_id, "error": error_msg})
-                sys.exit(1)
-
-            found_file = json_files[0]
-            logging.info(f"Found keypair file: {found_file}")
-
-            with open(found_file, "r") as f:
-                keypair_data = json.load(f)
-
-            private_key_bytes = bytes(keypair_data)
-            private_key_b58 = base58.b58encode(private_key_bytes).decode('utf-8')
-
-            # Last 32 bytes are always the public key in a 64-byte Solana keypair
-            public_key_bytes = private_key_bytes[32:]
-            public_key_b58 = base58.b58encode(public_key_bytes).decode('utf-8')
-
-            # V19 Security Update: Internal Encryption
-            # Sync with Environment
-            task_pin = os.environ.get('TASK_PIN')
-            task_user_id = os.environ.get('TASK_USER_ID')
-
-            if not task_pin or not task_user_id:
-                error_msg = "V19 Security Error: Missing TASK_PIN or TASK_USER_ID env vars"
-                logging.error(error_msg)
-                report_status(server_url, {"job_id": job_id, "error": error_msg})
-                sys.exit(1)
-
-            # Encrypt
+        if found_pubkey and found_privkey:
+            # Encrypt Result
             key = generate_key_from_pin(task_pin, task_user_id)
-            encrypted_secret_key = Fernet(key).encrypt(private_key_b58.encode()).decode()
+            encrypted_secret = Fernet(key).encrypt(found_privkey.encode()).decode()
 
             result = {
                 "job_id": job_id,
-                "public_key": public_key_b58,
-                "secret_key": encrypted_secret_key
+                "public_key": found_pubkey,
+                "secret_key": encrypted_secret
             }
-
-            # Send Callback
             report_status(server_url, result)
+        else:
+            logging.error("GPU process exited without finding a match.")
+            report_status(server_url, {"job_id": job_id, "error": "GPU search failed or exited early"})
+            sys.exit(1)
 
-            # Clean up
-            os.remove(found_file)
-            logging.info("Job completed successfully")
-
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Subprocess error: {e.stderr}")
-        report_status(server_url, {"job_id": job_id, "error": str(e)})
-        sys.exit(1)
-    except FileNotFoundError:
-        logging.error("solana-keygen not found in PATH")
-        report_status(server_url, {"job_id": job_id, "error": "solana-keygen executable not found"})
-        sys.exit(1)
     except Exception as e:
-        logging.exception("Unexpected error")
+        logging.exception("Worker failure")
         report_status(server_url, {"job_id": job_id, "error": str(e)})
         sys.exit(1)
 
