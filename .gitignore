@@ -7,3 +7,4 @@ node_modules/
 .env
 service-account.json
 firebase_credentials
+cpu-grinder/target/

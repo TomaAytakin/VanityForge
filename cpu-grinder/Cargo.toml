@@ -8,3 +8,6 @@ solana-sdk = "1.16"
 clap = { version = "4.4", features = ["derive"] }
 rayon = "1.8"
 bs58 = "0.5"
+ed25519-dalek = "1.0.1"
+rand = "0.7"
+num_cpus = "1.16"
