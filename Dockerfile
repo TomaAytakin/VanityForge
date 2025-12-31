@@ -12,7 +12,8 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y libssl3 ca-certificates
 
-RUN pip install --no-cache-dir firebase_admin google-cloud-firestore cryptography base58 google-cloud-logging requests
+COPY solanity-gpu/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the compiled Rust binary
 COPY --from=builder /app/target/release/cpu-grinder ./cpu-grinder-bin
