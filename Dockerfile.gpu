@@ -30,5 +30,12 @@ COPY solanity-gpu/requirements.txt .
 # Install Python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# Create non-root user (optional but good practice, though GPU access sometimes needs groups)
+# Keeping root for simplicity with GPU access in container unless strictly required
+
+# Set environment variable to tell worker to use GPU binary
+ENV WORKER_TYPE=GPU
+ENV BINARY_PATH=./gpu_grinder
+
 # Set Entrypoint
 ENTRYPOINT ["python3", "worker.py"]

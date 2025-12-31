@@ -1,10 +1,13 @@
 use clap::Parser;
 use rayon::prelude::*;
-use ed25519_dalek::{Keypair, SecretKey, PublicKey};
+use curve25519_dalek::scalar::Scalar;
+use curve25519_dalek::edwards::CompressedEdwardsY;
+use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use sha2::{Sha512, Digest};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -21,7 +24,6 @@ fn main() {
     let case = args.case_sensitive.to_lowercase() == "true";
     let found = Arc::new(AtomicBool::new(false));
 
-    // Calculate approximate threads to maximize CPU
     let cpu_count = num_cpus::get();
 
     rayon::scope(|s| {
@@ -31,11 +33,7 @@ fn main() {
             let suffix_clone = suffix.clone();
 
             s.spawn(move |_| {
-                // Initialize a random seed per thread
-                let mut seed = [0u8; 32];
                 let mut rng = OsRng::default();
-                rng.fill_bytes(&mut seed);
-
                 let mut attempts = 0;
 
                 loop {
@@ -43,24 +41,40 @@ fn main() {
                         break;
                     }
 
-                    // Increment seed (Big Endian or Little Endian doesn't matter for randomness)
-                    // We increment the first few bytes for speed
-                    seed[0] = seed[0].wrapping_add(1);
-                    if seed[0] == 0 {
-                        seed[1] = seed[1].wrapping_add(1);
-                        if seed[1] == 0 {
-                            // Re-seed occasionally to avoid getting stuck in a bad loop
-                            rng.fill_bytes(&mut seed);
-                        }
-                    }
+                    // 1. Generate a fresh seed
+                    let mut seed = [0u8; 32];
+                    rng.fill_bytes(&mut seed);
 
-                    // Efficient Key Generation from seed using ed25519-dalek v1
-                    // This performs SHA512 + Curve25519 mul
-                    if let Ok(secret) = SecretKey::from_bytes(&seed) {
-                        let public: PublicKey = (&secret).into();
+                    // 2. Expand Seed manually to get Scalar (Ref10 logic)
+                    // h = SHA512(seed)
+                    let h = Sha512::digest(&seed);
+
+                    // s = h[0..32], clamped
+                    let mut scalar_bytes = [0u8; 32];
+                    scalar_bytes.copy_from_slice(&h[0..32]);
+                    scalar_bytes[0] &= 248;
+                    scalar_bytes[31] &= 127;
+                    scalar_bytes[31] |= 64;
+
+                    let mut current_scalar = Scalar::from_bits(scalar_bytes);
+
+                    // 3. Compute Initial Point from Scalar
+                    // P = a * B
+                    let mut current_point = &current_scalar * &ED25519_BASEPOINT_POINT;
+
+                    // 4. Offset Loop (Grinding)
+                    for _ in 0..10000 {
+                         // Increment Scalar and Point
+                         // P' = P + B
+                         // s' = s + 1
+                        current_point = current_point + ED25519_BASEPOINT_POINT;
+                        current_scalar = current_scalar + Scalar::one();
+
+                        // Compress point to bytes
+                        let pk_bytes = current_point.compress().to_bytes();
 
                         // Encode to Base58
-                        let pk_b58 = bs58::encode(public.as_bytes()).into_string();
+                        let pk_b58 = bs58::encode(pk_bytes).into_string();
 
                         let p_match = if case { pk_b58.starts_with(&prefix_clone) } else { pk_b58.to_lowercase().starts_with(&prefix_clone.to_lowercase()) };
 
@@ -69,24 +83,24 @@ fn main() {
 
                             if s_match {
                                 if !found_clone.swap(true, Ordering::Relaxed) {
-                                    // Construct the final keypair bytes (64 bytes: 32 priv + 32 pub)
-                                    // Note: ed25519-dalek v1 SecretKey is 32 bytes (seed).
-                                    // Solana expects 64 bytes (seed + pubkey).
+                                    // Found a match!
+                                    // Construct 64-byte keypair: [scalar(32), public(32)]
                                     let mut final_keypair_bytes = [0u8; 64];
-                                    final_keypair_bytes[0..32].copy_from_slice(secret.as_bytes());
-                                    final_keypair_bytes[32..64].copy_from_slice(public.as_bytes());
+                                    final_keypair_bytes[0..32].copy_from_slice(current_scalar.as_bytes());
+                                    final_keypair_bytes[32..64].copy_from_slice(&pk_bytes);
 
                                     let final_b58 = bs58::encode(final_keypair_bytes).into_string();
-                                    println!("MATCH_FOUND:{}", final_b58);
+
+                                    // MATCH:<PUBKEY>:<FULL_KEYPAIR>
+                                    println!("MATCH:{}:{}", pk_b58, final_b58);
                                 }
-                                break;
+                                return;
                             }
                         }
                     }
 
                     attempts += 1;
-                    if attempts % 1000 == 0 {
-                        // Yield occasionally
+                    if attempts % 100 == 0 {
                         if found_clone.load(Ordering::Relaxed) { break; }
                     }
                 }
