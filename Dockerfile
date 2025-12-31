@@ -1,33 +1,36 @@
-FROM rust:latest as builder
+# 1. Builder: Use Bookworm (Debian 12) to match Runner
+FROM rust:1.75-bookworm as builder
 WORKDIR /app
 COPY cpu-grinder/ .
-# Add curve25519-dalek if not in Cargo.toml (it is now)
 RUN cargo build --release
 
-FROM python:3.9-slim
+# 2. Runner: Use Bookworm (Debian 12)
+FROM python:3.9-bookworm
 
 ENV PYTHONUNBUFFERED=1
-
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y libssl3 ca-certificates
+# Install System Libs for Rust Binary & Python Crypto
+RUN apt-get update && \
+    apt-get install -y ca-certificates libssl3 && \
+    rm -rf /var/lib/apt/lists/*
 
+# Install Python Deps
 COPY solanity-gpu/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the compiled Rust binary
+# Copy Artifacts
 COPY --from=builder /app/target/release/cpu-grinder ./cpu-grinder-bin
-
-# Copy the UNIFIED worker script from solanity-gpu
 COPY solanity-gpu/worker.py .
 
-# Create non-root user
-RUN useradd -m appuser && chown -R appuser:appuser /app
-RUN chmod +x ./cpu-grinder-bin
+# Setup Permissions
+RUN useradd -m appuser && \
+    chown -R appuser:appuser /app && \
+    chmod +x /app/cpu-grinder-bin
+
 USER appuser
 
-# Set environment variable to tell worker to use CPU binary
 ENV WORKER_TYPE=CPU
-ENV BINARY_PATH=./cpu-grinder-bin
+ENV BINARY_PATH=/app/cpu-grinder-bin
 
 CMD ["python", "worker.py"]
