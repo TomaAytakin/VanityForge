@@ -190,7 +190,7 @@ async function openAdminDashboard() {
     // Reveal parent container if needed (God Mode Bypass)
     const appInterface = document.getElementById('app-interface');
     if (appInterface.classList.contains('hidden')) {
-        document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('landing-container').classList.add('hidden');
         appInterface.classList.remove('hidden');
     }
 

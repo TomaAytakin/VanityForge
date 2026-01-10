@@ -189,26 +189,100 @@
         <span><span data-i18n="stats.forged">Vanity Identities Forged</span>: <span id="identity-counter" class="text-white font-bold text-base">...</span></span>
     </div>
 
-    <div class="w-full max-w-2xl mb-8 flex flex-col items-center justify-center mt-10 gap-4">
-        <div class="bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold py-2 px-6 rounded-full shadow-lg border border-green-400 flex items-center gap-2">
-            <span class="relative flex h-3 w-3">
-              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-200 opacity-75"></span>
-              <span class="relative inline-flex rounded-full h-3 w-3 bg-green-400"></span>
-            </span>
-            <span><i class="fa-brands fa-nvidia"></i> ⚡ <span data-i18n="stats.cluster">300 MH/S CLUSTER: The Fastest Custom Solana Key Generator</span></span>
-        </div>
-        <img src="animated_forge.gif" alt="VanityForge Banner" class="rounded-xl shadow-2xl border border-gray-700 max-w-full h-auto">
-    </div>
+    <!-- Main Landing Container -->
+    <div id="landing-container" class="w-full max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-12 mt-10 px-4 mb-12">
 
-    <div id="auth-section" class="w-full max-w-2xl glass-panel p-8 rounded-xl shadow-lg text-center transition-all duration-300">
-        <h2 class="text-2xl font-bold mb-6 text-purple-400">Connect to VanityForge</h2>
-        <div class="flex flex-col gap-4 max-w-xs mx-auto">
-            <button onclick="loginWithGoogle()" class="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
-                <i class="fa-brands fa-google"></i> Login with Google
-            </button>
-            <button id="connect-phantom-btn" onclick="connectWallet()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
-                <i class="fa-solid fa-wallet"></i> Connect Phantom
-            </button>
+        <!-- Left Column: Copy & Selling Points -->
+        <div class="flex-1 text-center md:text-left space-y-8">
+            <!-- Hero Headline -->
+            <div>
+                 <h1 class="text-4xl md:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-green-400 mb-4 leading-tight">
+                    Forge Your Custom Identity on Solana.
+                 </h1>
+                 <p class="text-xl text-gray-400">
+                    The fastest, safest way to generate readable vanity addresses.
+                 </p>
+            </div>
+
+            <!-- Selling Points -->
+            <div class="space-y-6">
+                <!-- Point 1: Incentive -->
+                <div class="flex items-center gap-4 bg-gray-800/50 p-4 rounded-xl border border-purple-500/20 shadow-lg transform hover:scale-[1.02] transition-transform">
+                    <div class="bg-purple-900/30 p-3 rounded-full text-purple-400">
+                         <i class="fa-solid fa-gift text-2xl"></i>
+                    </div>
+                    <div>
+                         <h3 class="font-bold text-white text-lg">Login with Google</h3>
+                         <p class="text-gray-400 text-sm">Get <span class="text-green-400 font-bold">2 Free Wallet Generations</span> instantly.</p>
+                    </div>
+                </div>
+
+                <!-- Point 2: Product -->
+                <div class="flex items-center gap-4 p-2">
+                     <div class="bg-gray-800 p-3 rounded-full text-blue-400 w-12 h-12 flex items-center justify-center">
+                         <i class="fa-solid fa-hammer"></i>
+                     </div>
+                     <div>
+                         <h3 class="font-bold text-white">Custom .sol Addresses</h3>
+                         <p class="text-gray-400 text-sm">Create addresses like <span class="font-mono text-purple-300">Start...</span> or <span class="font-mono text-purple-300">Moon...</span></p>
+                     </div>
+                </div>
+
+                 <!-- Point 3: Security -->
+                <div class="flex items-center gap-4 p-2">
+                     <div class="bg-gray-800 p-3 rounded-full text-green-400 w-12 h-12 flex items-center justify-center">
+                         <i class="fa-solid fa-shield-halved"></i>
+                     </div>
+                     <div>
+                         <h3 class="font-bold text-white">100% Non-Custodial</h3>
+                         <p class="text-gray-400 text-sm">Google OAuth + Client-Side PIN encryption. We never see your keys.</p>
+                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Login Card & Visuals -->
+        <div class="w-full max-w-md flex flex-col gap-6">
+
+            <div class="bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold py-2 px-6 rounded-full shadow-lg border border-green-400 flex items-center justify-center gap-2 mx-auto w-max mb-[-20px] z-10 relative">
+                <span class="relative flex h-3 w-3">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-200 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-3 w-3 bg-green-400"></span>
+                </span>
+                <span><i class="fa-brands fa-nvidia"></i> ⚡ <span data-i18n="stats.cluster">300 MH/S CLUSTER</span></span>
+            </div>
+
+            <div id="auth-section" class="glass-panel p-8 rounded-2xl shadow-2xl border-t border-purple-500/50 relative overflow-hidden text-center">
+                 <!-- Decorative background glow -->
+                 <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
+
+                <div class="text-center mb-8 mt-4">
+                     <h2 class="text-2xl font-bold text-white">Start Forging</h2>
+                     <p class="text-sm text-gray-400 mt-2">Join 1,200+ users securing their identity.</p>
+                </div>
+
+                <div class="flex flex-col gap-4">
+                    <button onclick="loginWithGoogle()" class="relative group bg-white hover:bg-gray-100 text-gray-900 font-bold py-4 px-6 rounded-xl transition duration-200 flex items-center justify-center gap-3 shadow-lg transform hover:-translate-y-1">
+                        <span class="absolute -top-3 -right-3 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-bounce">RECOMMENDED</span>
+                        <i class="fa-brands fa-google text-xl text-red-500"></i>
+                        <span class="text-lg">Login with Google</span>
+                    </button>
+
+                    <div class="relative flex py-2 items-center">
+                        <div class="flex-grow border-t border-gray-700"></div>
+                        <span class="flex-shrink-0 mx-4 text-gray-600 text-xs uppercase">Or</span>
+                        <div class="flex-grow border-t border-gray-700"></div>
+                    </div>
+
+                    <button id="connect-phantom-btn" onclick="connectWallet()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+                        <i class="fa-solid fa-wallet text-purple-400"></i> Connect Phantom
+                    </button>
+                </div>
+
+                 <p class="text-center text-[10px] text-gray-500 mt-6">
+                    By connecting, you agree to our <a href="#" onclick="openTermsModal(); return false;" class="underline hover:text-gray-400">Terms</a>.
+                </p>
+            </div>
         </div>
     </div>
 
@@ -1101,7 +1175,7 @@
                         typeof window.walletAddress === "string"
                     ) {
                         // Prompt to create PIN
-                        document.getElementById('auth-section').classList.add('hidden');
+                        document.getElementById('landing-container').classList.add('hidden');
                         // Hide auth temporarily
                         openNumpad('create', 'Create your Vault PIN', null);
                     }
@@ -1140,7 +1214,7 @@
         }
 
         function onLoginSuccess(isDev = false) {
-            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('landing-container').classList.add('hidden');
             const appInterface = document.getElementById('app-interface');
             appInterface.classList.remove('hidden');
             document.getElementById('job-queue-section').classList.remove('hidden');
@@ -1635,7 +1709,7 @@
                 currentUserEmail = null;
                 document.getElementById('app-interface').classList.add('hidden');
                 document.getElementById('job-queue-section').classList.add('hidden');
-                document.getElementById('auth-section').classList.remove('hidden');
+                document.getElementById('landing-container').classList.remove('hidden');
                 // Hide mobile menu if open
                 const mobileMenu = document.getElementById('mobile-menu');
                 if (mobileMenu && !mobileMenu.classList.contains('hidden')) {
