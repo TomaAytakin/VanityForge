@@ -148,19 +148,6 @@ async function checkAdmin() {
             const devBtn = document.getElementById('nav-dev');
             if (devBtn) {
                 devBtn.classList.remove('hidden');
-
-                // Inject Email Display
-                if (data.email) {
-                    let emailDisplay = document.getElementById('admin-email-display');
-                    if (!emailDisplay) {
-                        emailDisplay = document.createElement('span');
-                        emailDisplay.id = 'admin-email-display';
-                        emailDisplay.className = 'text-[10px] text-gray-500 font-mono hidden md:inline-block bg-black/50 px-1 rounded border border-gray-700 ml-2';
-                        const container = document.getElementById('admin-info-container');
-                        if (container) container.appendChild(emailDisplay);
-                    }
-                    emailDisplay.innerText = data.email;
-                }
             }
 
             // Bind to "GOD MODE ACTIVE" text if present (for mobile/alternate access)
