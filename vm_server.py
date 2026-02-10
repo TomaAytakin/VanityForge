@@ -609,7 +609,8 @@ def check_user():
         return jsonify({
             'has_pin': bool(user_data.get('pin_hash')),
             'trials_used': check_user_trials(user_id),
-            'referred_by': user_data.get('referred_by')
+            'referred_by': user_data.get('referred_by'),
+            'is_admin': is_admin_session()
         })
     except Exception as e: return jsonify({'error': str(e)}), 500
     finally:

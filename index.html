@@ -722,13 +722,14 @@
             // Optional: alert(error.message);
         });
         // STATE
-        const ADMIN_EMAILS = ["tomaaytakin@gmail.com", "Jonny95hidalgo@gmail.com", "admin@vanityforge.org"];
+        // const ADMIN_EMAILS = ["tomaaytakin@gmail.com", "Jonny95hidalgo@gmail.com", "admin@vanityforge.org"]; // REMOVED - Managed by backend
         let isExplicitLogin = false;
         var currentUser = null;
         var currentUserEmail = null;
         var jobListenerUnsubscribe = null;
         var userTrialsUsed = 0;
         var referralDiscountActive = false;
+        var isAdminSession = false; // Track admin status from backend
 
         // AUDIO SYSTEM
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1119,6 +1120,7 @@
                 });
                 const data = await res.json();
                 userTrialsUsed = data.trials_used || 0;
+                isAdminSession = data.is_admin || false;
 
                 // Lifetime Binding Check
                 if (data.referred_by) {
@@ -1188,8 +1190,8 @@
             appInterface.classList.remove('hidden');
             document.getElementById('job-queue-section').classList.remove('hidden');
 
-            // God Mode Check
-            if (ADMIN_EMAILS.includes(currentUserEmail)) {
+            // God Mode Check (Backend Driven)
+            if (isAdminSession) {
                 // Reveal ALL admin exclusive elements (Master Control + Turbo Radio)
                 document.querySelectorAll('.admin-exclusive').forEach(el => {
                     el.classList.remove('admin-exclusive');
@@ -1435,7 +1437,7 @@
             submitBtn.disabled = true;
 
             // God Mode Check
-            const isGodMode = ADMIN_EMAILS.includes(currentUserEmail);
+            const isGodMode = isAdminSession;
             // Calculate Price & Check Payment
             const totalLen = prefix.length + suffix.length;
             // Fixed Pricing Logic
